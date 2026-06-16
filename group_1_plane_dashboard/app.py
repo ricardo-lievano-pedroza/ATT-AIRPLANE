@@ -290,15 +290,19 @@ st.divider()
 st.subheader("Key Findings")
 st.markdown(
     """
-- **Airport tax rates vary significantly by geography.** Some regions show
-  tax burdens above 30% of the ticket price, while others stay below 10%.
-- **Local tax compounds the burden.** In high-tax markets, local tax adds
-  a substantial amount on top of the airport tax.
-- **High ticket prices do not always correlate with high tax rates.** Some
-  routes carry high taxes relative to a low base fare, signalling price
-  sensitivity risk.
-- **Tax structure differs by continent.** The stacked bar shows whether the
-  burden is driven by airport-level charges or country-level local taxes.
+- **Tax rates vary significantly by geography.** The map shows that some
+  airports carry a tax burden above 30% of the ticket price while others
+  stay below 10%, making geography a key factor in route pricing.
+- **The highest financial impact is concentrated in a few busy airports.**
+  The total tax collected chart shows that high-volume airports dominate
+  the tax burden even when their rate is not the highest — volume amplifies
+  the effect.
+- **High ticket prices do not always correlate with high tax rates.** The
+  scatter plot reveals airports where taxes are high relative to a low base
+  fare, signalling routes with the greatest price sensitivity risk.
+- **Specific country markets drive the tax burden.** The top countries chart
+  identifies which markets should be prioritised for fare strategy review
+  given their consistently high tax rates across airports.
 """
 )
 
