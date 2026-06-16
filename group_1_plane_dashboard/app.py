@@ -5,7 +5,7 @@ import pandas as pd
 from sqlalchemy import create_engine
 from pathlib import Path
 
-from analysis import load_data, filter_data, agg_by_continent
+from analysis import load_data, filter_data
 
 DB_URL = "db2+ibm_db://attgrp1:bigdata@52.211.123.34:25010/ATTPLANE"
 SCHEMA = "ATTGRP1"
@@ -147,23 +147,38 @@ st.divider()
 col_left, col_right = st.columns(2)
 
 with col_left:
-    st.subheader("Top 15 Airports by Tax Rate")
-    top15 = filtered.head(15).to_pandas()
+    st.subheader("Top 15 Airports by Total Tax Collected")
+    st.caption(
+        "High rate + high volume = biggest financial impact on passengers."
+    )
+    top15 = (
+        filtered.lazy()
+        .with_columns(
+            (pl.col("avg_total_tax") * pl.col("ticket_count"))
+            .alias("total_tax_collected"),
+        )
+        .sort("total_tax_collected", descending=True)
+        .head(15)
+        .collect()
+        .to_pandas()
+    )
     bar_fig = px.bar(
         top15,
-        x="avg_tax_pct",
+        x="total_tax_collected",
         y="origin_airport",
         orientation="h",
         color="origin_continent",
         hover_data={
             "origin_country": True,
-            "avg_airport_tax": ":.2f",
-            "avg_local_tax": ":.2f",
+            "avg_tax_pct": ":.1f",
+            "ticket_count": True,
         },
         labels={
-            "avg_tax_pct": "Avg Tax % of Ticket",
+            "total_tax_collected": "Total Tax Collected ($)",
             "origin_airport": "",
             "origin_continent": "Continent",
+            "avg_tax_pct": "Avg Tax %",
+            "ticket_count": "Tickets",
         },
     )
     bar_fig.update_layout(
@@ -193,38 +208,49 @@ with col_right:
 
 st.divider()
 
-# ── Chart 4: Tax breakdown by continent ─────────────────────────────────────
-st.subheader("Tax Breakdown by Continent")
+# ── Chart 4: Top countries by tax rate ──────────────────────────────────────
+st.subheader("Top 15 Countries by Tax Rate")
 st.caption(
-    "How much of the tax burden comes from airport tax vs. local tax?"
+    "Which markets have the highest tax burden? "
+    "These are the routes most exposed to price sensitivity."
 )
 
-continent_df = agg_by_continent(filtered)
-stacked_fig = px.bar(
-    continent_df.to_pandas(),
-    x="origin_continent",
-    y=["avg_airport_tax", "avg_local_tax"],
-    barmode="stack",
-    labels={
-        "origin_continent": "Continent",
-        "value": "Avg Tax ($)",
-        "variable": "Tax Type",
-    },
-    color_discrete_map={
-        "avg_airport_tax": "#e07b54",
-        "avg_local_tax": "#c0392b",
-    },
-)
-stacked_fig.for_each_trace(
-    lambda t: t.update(
-        name={
-            "avg_airport_tax": "Airport Tax",
-            "avg_local_tax": "Local Tax",
-        }[t.name]
+top_countries = (
+    filtered.lazy()
+    .group_by("origin_country", "origin_continent")
+    .agg(
+        pl.col("avg_tax_pct").mean().alias("avg_tax_pct"),
+        pl.col("ticket_count").sum().alias("ticket_count"),
+        pl.col("avg_ticket_value").mean().alias("avg_ticket_value"),
     )
+    .sort("avg_tax_pct", descending=True)
+    .head(15)
+    .collect()
 )
-stacked_fig.update_layout(legend_title_text="Tax Type")
-st.plotly_chart(stacked_fig, width="stretch")
+
+country_fig = px.bar(
+    top_countries.to_pandas(),
+    x="avg_tax_pct",
+    y="origin_country",
+    orientation="h",
+    color="origin_continent",
+    hover_data={
+        "ticket_count": True,
+        "avg_ticket_value": ":.2f",
+    },
+    labels={
+        "avg_tax_pct": "Avg Tax % of Ticket",
+        "origin_country": "",
+        "origin_continent": "Continent",
+        "ticket_count": "Tickets",
+        "avg_ticket_value": "Avg Ticket ($)",
+    },
+)
+country_fig.update_layout(
+    yaxis={"categoryorder": "total ascending"},
+    legend_title_text="Continent",
+)
+st.plotly_chart(country_fig, width="stretch")
 
 st.divider()
 
