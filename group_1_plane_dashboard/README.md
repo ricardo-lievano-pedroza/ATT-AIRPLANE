@@ -2,7 +2,9 @@
 
 ## Group Members
 - Andrea Alarcon
-- *(add remaining members)*
+- Juan José Rincón Briceño
+- Ricardo Liévano Pedroza
+- Dalton Pearce Kern
 
 ## Database Schema
 `ATTGRP1` on DB2 host `52.211.123.34:25010`, database `ATTPLANE`.
