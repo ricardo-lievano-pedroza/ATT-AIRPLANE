@@ -53,19 +53,3 @@ def filter_data(
         & pl.col("origin_country").is_in(countries)
         & pl.col("avg_tax_pct").is_between(tax_range[0], tax_range[1])
     )
-
-
-def agg_by_continent(df: pl.DataFrame) -> pl.DataFrame:
-    return (
-        df.lazy()
-        .group_by("origin_continent")
-        .agg(
-            pl.col("ticket_count").sum(),
-            pl.col("avg_airport_tax").mean(),
-            pl.col("avg_local_tax").mean(),
-            pl.col("avg_tax_pct").mean(),
-            pl.col("avg_ticket_value").mean(),
-        )
-        .sort("avg_tax_pct", descending=True)
-        .collect()
-    )
