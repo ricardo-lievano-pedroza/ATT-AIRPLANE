@@ -20,13 +20,9 @@ pip install -r requirements.txt
 
 ## How to Run
 
-**Step 1 — Pull data from DB2 (run once):**
-```bash
-python db.py
-```
-This saves `data/airports.parquet`, `data/routes.parquet`, and `data/tickets.parquet`.
+The `data/` folder contains pre-built Parquet files — no database connection needed.
 
-**Step 2 — Launch the dashboard:**
+**Launch the dashboard:**
 ```bash
 streamlit run app.py
 ```
@@ -37,17 +33,17 @@ streamlit run app.py
 |---|---|
 | KPI row | Total tickets, average tax per ticket, average tax %, airports in view |
 | World map | Average tax % by origin airport, bubble-sized by ticket volume |
-| Top 15 airports bar chart | Airports with highest average tax rate, coloured by continent |
-| Tax vs ticket price scatter | Whether high-tax airports also charge higher base fares |
-| Tax breakdown by continent | Airport tax vs local tax stacked by continent |
+| Top 15 airports by total tax collected | Airports where high rate × high volume creates the greatest tax burden |
+| Tax burden vs ticket price scatter | Whether high-tax airports also charge higher base fares |
+| Top 15 countries by tax rate | Which markets consistently have the highest tax burden |
 | Summary table + CSV export | Full airport-level metrics |
 
 ## Key Findings
 
-1. Tax rates vary widely by geography — some airports exceed 30% tax burden relative to the ticket price.
-2. Local tax compounds airport tax in certain markets, raising total cost significantly.
-3. High ticket prices do not always accompany high tax rates — some routes have high taxes on low-cost fares.
-4. The continent breakdown shows whether tax burden is driven by airport-level or government-level charges.
+1. Tax rates vary significantly by geography — some airports carry a burden above 30% of the ticket price while others stay below 10%.
+2. The highest financial impact is concentrated in a few busy airports — volume amplifies the effect even when the rate is not the highest.
+3. High ticket prices do not always correlate with high tax rates — some routes have high taxes on low base fares, signalling price sensitivity risk.
+4. Specific country markets drive the overall tax burden and should be prioritised for fare strategy review.
 
 ## Limitations & Assumptions
 
