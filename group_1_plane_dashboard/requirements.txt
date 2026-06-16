@@ -1,0 +1,8 @@
+polars
+streamlit
+plotly
+sqlalchemy
+ibm_db
+ibm_db_sa
+pandas
+pyarrow
