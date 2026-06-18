@@ -94,7 +94,7 @@ def fetch_and_save():
     print("Loading revenue table...")
     with engine.connect() as conn:
         revenue = pd.read_sql(REVENUE_AGG_SQL, conn)
-    revenue.columns = [c.lower().strip() for c in airports.columns]
+    revenue.columns = [c.lower().strip() for c in revenue.columns]
     pl.from_pandas(revenue).write_parquet(DATA_DIR / "revenue.parquet")
     print(f"  {len(revenue)} records of revenue by year-month and route → data/revenue.parquet")
 
