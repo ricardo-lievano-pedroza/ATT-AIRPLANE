@@ -74,9 +74,33 @@ def get_staff_data() -> tuple[pl.DataFrame, pl.DataFrame]:
     return load_staff_flights(), load_crew_gaps()
 
 
+MONTH_LABELS   = {7: "Jul", 8: "Aug", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"}
+WEEKDAY_LABELS = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun"}
+
+
+@st.cache_data
+def get_capacity_data() -> pl.DataFrame | None:
+    path = DATA_DIR / "capacity.parquet"
+    if not path.exists():
+        return None
+    return (
+        pl.read_parquet(path)
+        .with_columns(
+            pl.when(pl.col("total_capacity") > 0)
+              .then(pl.col("tickets_sold").cast(pl.Float64) / pl.col("total_capacity"))
+              .otherwise(None)
+              .alias("occupancy_rate"),
+            (pl.col("total_capacity") - pl.col("tickets_sold")).alias("available_seats"),
+            pl.col("departure").dt.month().alias("month"),
+            pl.col("departure").dt.week().alias("week"),
+            pl.col("departure").dt.weekday().alias("day_of_week"),
+        )
+    )
+
+
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 
-tab1, tab2 = st.tabs(["Revenue & Tax", "Staff Occupation"])
+tab1, tab2, tab3 = st.tabs(["Revenue & Tax", "Staff Occupation", "Flight Occupation"])
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -512,3 +536,278 @@ with tab2:
         "Data source: ATTGRP1.FLIGHT_CREW joined with ATTGRP1.STAFF and ATTGRP1.ROUTES. "
         "Crew gaps derived from ATTGRP1.FLIGHTS × ATTGRP1.AIRPLANES.CREW_MEMBERS."
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 3 — Flight Occupation
+# ══════════════════════════════════════════════════════════════════════════════
+
+with tab3:
+    cap_df = get_capacity_data()
+
+    if cap_df is None:
+        st.error(
+            "data/capacity.parquet not found. "
+            "Run the SQL cell in s04_group_project.ipynb to generate it, "
+            "then copy the file into the data/ folder."
+        )
+    else:
+        # ── Sidebar filters ───────────────────────────────────────────────────
+        st.sidebar.markdown("---")
+        st.sidebar.subheader("Flight Occupation filters")
+        st.sidebar.caption("Leave a filter empty to include all values.")
+
+        all_months = sorted(cap_df["month"].unique().to_list())
+        sel_months = st.sidebar.multiselect(
+            "Departure month",
+            options=all_months,
+            default=[],
+            format_func=lambda m: MONTH_LABELS.get(m, str(m)),
+        )
+
+        all_weekdays = sorted(cap_df["day_of_week"].unique().to_list())
+        sel_weekdays = st.sidebar.multiselect(
+            "Departure day of week",
+            options=all_weekdays,
+            default=[],
+            format_func=lambda d: WEEKDAY_LABELS.get(d, str(d)),
+        )
+
+        all_weeks = sorted(cap_df["week"].unique().to_list())
+        sel_weeks = st.sidebar.multiselect(
+            "Departure week (ISO #)",
+            options=all_weeks,
+            default=[],
+        )
+
+        all_routes = sorted(cap_df["route_code"].drop_nulls().unique().to_list())
+        sel_routes = st.sidebar.multiselect(
+            "Route code",
+            options=all_routes,
+            default=[],
+        )
+
+        all_airplanes = sorted(cap_df["airplane_id"].drop_nulls().unique().to_list())
+        sel_airplanes = st.sidebar.multiselect(
+            "Airplane ID",
+            options=all_airplanes,
+            default=[],
+        )
+
+        all_flights = sorted(cap_df["flight_id"].drop_nulls().unique().to_list())
+        sel_flights = st.sidebar.multiselect(
+            "Flight ID",
+            options=all_flights,
+            default=[],
+        )
+
+        # Apply filters — empty selection means no filter on that dimension
+        filtered_cap = cap_df
+        if sel_months:
+            filtered_cap = filtered_cap.filter(pl.col("month").is_in(sel_months))
+        if sel_weekdays:
+            filtered_cap = filtered_cap.filter(pl.col("day_of_week").is_in(sel_weekdays))
+        if sel_weeks:
+            filtered_cap = filtered_cap.filter(pl.col("week").is_in(sel_weeks))
+        if sel_routes:
+            filtered_cap = filtered_cap.filter(pl.col("route_code").is_in(sel_routes))
+        if sel_airplanes:
+            filtered_cap = filtered_cap.filter(pl.col("airplane_id").is_in(sel_airplanes))
+        if sel_flights:
+            filtered_cap = filtered_cap.filter(pl.col("flight_id").is_in(sel_flights))
+
+        # ── Header & KPIs ─────────────────────────────────────────────────────
+        st.title("Flight Occupation Analysis  (Jul – Dec 2025)")
+        st.markdown(
+            "Seat occupancy rates across routes, aircraft, and time — "
+            "how many available seats were filled on each departure."
+        )
+
+        total_cap_val  = filtered_cap["total_capacity"].sum()
+        total_sold_val = filtered_cap["tickets_sold"].sum()
+        overall_occ    = total_sold_val / total_cap_val if total_cap_val > 0 else 0.0
+
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric("Flight Departures",   f"{filtered_cap.height:,}")
+        k2.metric("Total Seat Capacity", f"{total_cap_val:,}")
+        k3.metric("Tickets Sold",        f"{total_sold_val:,}")
+        k4.metric("Overall Occupancy",   f"{overall_occ:.1%}")
+
+        st.divider()
+
+        # ── Aggregation helper ────────────────────────────────────────────────
+        def agg_occ(df: pl.DataFrame, dim: str) -> pl.DataFrame:
+            return (
+                df.group_by(dim)
+                .agg(
+                    pl.len().alias("flights"),
+                    pl.col("total_capacity").sum().alias("total_capacity"),
+                    pl.col("tickets_sold").sum().alias("tickets_sold"),
+                )
+                .with_columns(
+                    (pl.col("tickets_sold") / pl.col("total_capacity")).alias("occupancy_rate"),
+                    (pl.col("total_capacity") - pl.col("tickets_sold")).alias("available_seats"),
+                )
+                .sort(dim)
+            )
+
+        # ── Row 1: Month and Day of Week ──────────────────────────────────────
+        col_month, col_dow = st.columns(2)
+
+        with col_month:
+            st.subheader("Occupancy by Month")
+            month_agg = agg_occ(filtered_cap, "month").with_columns(
+                pl.col("month")
+                  .map_elements(lambda m: MONTH_LABELS.get(m, str(m)), return_dtype=pl.String)
+                  .alias("label")
+            )
+            fig_m = px.bar(
+                month_agg.to_pandas(), x="label", y="occupancy_rate",
+                custom_data=["flights", "tickets_sold", "total_capacity", "available_seats"],
+                labels={"label": "Month", "occupancy_rate": "Occupancy Rate"},
+                color="occupancy_rate", color_continuous_scale="RdYlGn", range_color=[0, 1],
+            )
+            fig_m.update_traces(
+                texttemplate="%{y:.1%}", textposition="outside",
+                hovertemplate=(
+                    "<b>%{x}</b><br>Occupancy: %{y:.1%}<br>"
+                    "Tickets sold: %{customdata[1]:,}<br>Capacity: %{customdata[2]:,}<br>"
+                    "Available: %{customdata[3]:,}<br>Flights: %{customdata[0]:,}<extra></extra>"
+                ),
+            )
+            fig_m.update_yaxes(tickformat=".0%", range=[0, 1.15])
+            fig_m.update_coloraxes(showscale=False)
+            st.plotly_chart(fig_m, use_container_width=True)
+
+        with col_dow:
+            st.subheader("Occupancy by Day of Week")
+            dow_agg = agg_occ(filtered_cap, "day_of_week").with_columns(
+                pl.col("day_of_week")
+                  .map_elements(lambda d: WEEKDAY_LABELS.get(d, str(d)), return_dtype=pl.String)
+                  .alias("label")
+            )
+            fig_d = px.bar(
+                dow_agg.to_pandas(), x="label", y="occupancy_rate",
+                custom_data=["flights", "tickets_sold", "total_capacity", "available_seats"],
+                labels={"label": "Day of Week", "occupancy_rate": "Occupancy Rate"},
+                color="occupancy_rate", color_continuous_scale="RdYlGn", range_color=[0, 1],
+            )
+            fig_d.update_traces(
+                texttemplate="%{y:.1%}", textposition="outside",
+                hovertemplate=(
+                    "<b>%{x}</b><br>Occupancy: %{y:.1%}<br>"
+                    "Tickets sold: %{customdata[1]:,}<br>Capacity: %{customdata[2]:,}<br>"
+                    "Available: %{customdata[3]:,}<br>Flights: %{customdata[0]:,}<extra></extra>"
+                ),
+            )
+            fig_d.update_yaxes(tickformat=".0%", range=[0, 1.15])
+            fig_d.update_coloraxes(showscale=False)
+            st.plotly_chart(fig_d, use_container_width=True)
+
+        st.divider()
+
+        # ── Row 2: Weekly trend ───────────────────────────────────────────────
+        st.subheader("Weekly Occupancy Trend")
+        st.caption("Occupancy rate per ISO week — reveals seasonal patterns across the 6-month window.")
+        week_agg = agg_occ(filtered_cap, "week")
+        fig_w = px.line(
+            week_agg.to_pandas(), x="week", y="occupancy_rate", markers=True,
+            custom_data=["flights", "tickets_sold", "total_capacity"],
+            labels={"week": "ISO Week", "occupancy_rate": "Occupancy Rate"},
+        )
+        fig_w.update_traces(
+            hovertemplate=(
+                "<b>Week %{x}</b><br>Occupancy: %{y:.1%}<br>"
+                "Tickets sold: %{customdata[1]:,}<br>Capacity: %{customdata[2]:,}<br>"
+                "Flights: %{customdata[0]:,}<extra></extra>"
+            ),
+        )
+        fig_w.update_yaxes(tickformat=".0%")
+        st.plotly_chart(fig_w, use_container_width=True)
+
+        st.divider()
+
+        # ── Row 3: Route and Airplane ─────────────────────────────────────────
+        col_route, col_plane = st.columns(2)
+
+        with col_route:
+            st.subheader("Top 20 Routes by Occupancy")
+            route_agg = (
+                agg_occ(filtered_cap, "route_code")
+                .sort("occupancy_rate", descending=True)
+                .head(20)
+            )
+            fig_r = px.bar(
+                route_agg.to_pandas(), x="occupancy_rate", y="route_code", orientation="h",
+                custom_data=["flights", "tickets_sold", "total_capacity", "available_seats"],
+                labels={"route_code": "", "occupancy_rate": "Occupancy Rate"},
+                color="occupancy_rate", color_continuous_scale="RdYlGn", range_color=[0, 1],
+            )
+            fig_r.update_traces(
+                texttemplate="%{x:.1%}", textposition="outside",
+                hovertemplate=(
+                    "<b>%{y}</b><br>Occupancy: %{x:.1%}<br>"
+                    "Tickets sold: %{customdata[1]:,}<br>Capacity: %{customdata[2]:,}<br>"
+                    "Available: %{customdata[3]:,}<br>Flights: %{customdata[0]:,}<extra></extra>"
+                ),
+            )
+            fig_r.update_xaxes(tickformat=".0%", range=[0, 1.15])
+            fig_r.update_coloraxes(showscale=False)
+            fig_r.update_layout(yaxis={"categoryorder": "total ascending"})
+            st.plotly_chart(fig_r, use_container_width=True)
+
+        with col_plane:
+            st.subheader("Top 20 Airplanes by Occupancy")
+            plane_agg = (
+                agg_occ(filtered_cap, "airplane_id")
+                .sort("occupancy_rate", descending=True)
+                .head(20)
+            )
+            fig_p = px.bar(
+                plane_agg.to_pandas(), x="occupancy_rate", y="airplane_id", orientation="h",
+                custom_data=["flights", "tickets_sold", "total_capacity", "available_seats"],
+                labels={"airplane_id": "", "occupancy_rate": "Occupancy Rate"},
+                color="occupancy_rate", color_continuous_scale="RdYlGn", range_color=[0, 1],
+            )
+            fig_p.update_traces(
+                texttemplate="%{x:.1%}", textposition="outside",
+                hovertemplate=(
+                    "<b>%{y}</b><br>Occupancy: %{x:.1%}<br>"
+                    "Tickets sold: %{customdata[1]:,}<br>Capacity: %{customdata[2]:,}<br>"
+                    "Available: %{customdata[3]:,}<br>Flights: %{customdata[0]:,}<extra></extra>"
+                ),
+            )
+            fig_p.update_xaxes(tickformat=".0%", range=[0, 1.15])
+            fig_p.update_coloraxes(showscale=False)
+            fig_p.update_layout(yaxis={"categoryorder": "total ascending"})
+            st.plotly_chart(fig_p, use_container_width=True)
+
+        st.divider()
+
+        # ── Flight-level detail ───────────────────────────────────────────────
+        st.subheader("Flight Departure Detail")
+        st.caption(f"{filtered_cap.height:,} departures matching current filters.")
+        detail = (
+            filtered_cap
+            .with_columns(
+                (pl.col("occupancy_rate") * 100).round(1).alias("occupancy_%")
+            )
+            .select([
+                "flight_id", "departure", "route_code", "airplane_id",
+                "total_capacity", "tickets_sold", "available_seats", "occupancy_%",
+            ])
+            .sort("occupancy_%", descending=True)
+            .to_pandas()
+        )
+        st.dataframe(detail, use_container_width=True)
+        st.download_button(
+            "Download flight detail CSV",
+            data=detail.to_csv(index=False),
+            file_name="flight_occupation_detail.csv",
+            mime="text/csv",
+        )
+
+        st.caption(
+            "Data source: ATTGRP1.FLIGHTS × ATTGRP1.AIRPLANES × ATTGRP1.TICKETS "
+            "(Jul–Dec 2025). Occupancy = tickets sold / total seat capacity."
+        )
