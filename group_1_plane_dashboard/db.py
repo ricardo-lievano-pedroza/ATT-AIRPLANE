@@ -31,6 +31,48 @@ GROUP BY r.ORIGIN
 AIRPORTS_SQL = f"SELECT * FROM {SCHEMA}.AIRPORTS"
 
 
+REVENUE_AGG_SQL = """
+    WITH
+    revenue_agg AS (
+        SELECT
+            CAST(t.DEPARTURE AS TIMESTAMP) AS DEPARTURE,
+            t.ROUTE_CODE,
+            t.CLASS,
+            sum(t.TOTAL_AMOUNT) AS REVENUE
+        FROM TICKETS t
+        GROUP BY t.DEPARTURE,t.ROUTE_CODE,t.CLASS
+    ),
+    routes_add AS (
+        SELECT
+            t.DEPARTURE,
+            t.ROUTE_CODE,
+            r.ORIGIN ,
+            r.DESTINATION,
+            t.CLASS,
+            t.REVENUE
+        FROM revenue_agg t
+        JOIN ROUTES r ON t.ROUTE_CODE = r.ROUTE_CODE
+    ),
+    geo_add AS (
+        SELECT
+            YEAR(r.DEPARTURE) AS year,
+            date_trunc('MONTH', r.DEPARTURE ) AS MONTH,
+            a.CONTINENT,
+            a.COUNTRY,
+            a.CITY,
+            r.ROUTE_CODE,
+            r.ORIGIN,
+            r.DESTINATION,
+            r.CLASS,
+            r.REVENUE
+        FROM routes_add r 
+        JOIN AIRPORTS a 
+        ON A.IATA_CODE = r.ORIGIN
+    )
+    SELECT * FROM geo_add
+    """
+
+
 def fetch_and_save():
     DATA_DIR.mkdir(exist_ok=True)
     engine = create_engine(DB_URL)
@@ -48,6 +90,13 @@ def fetch_and_save():
     airports.columns = [c.lower().strip() for c in airports.columns]
     pl.from_pandas(airports).write_parquet(DATA_DIR / "airports.parquet")
     print(f"  {len(airports)} airports → data/airports.parquet")
+
+    print("Loading revenue table...")
+    with engine.connect() as conn:
+        revenue = pd.read_sql(REVENUE_AGG_SQL, conn)
+    revenue.columns = [c.lower().strip() for c in revenue.columns]
+    pl.from_pandas(revenue).write_parquet(DATA_DIR / "revenue.parquet")
+    print(f"  {len(revenue)} records of revenue by year-month and route → data/revenue.parquet")
 
     print("Done.")
 
