@@ -63,11 +63,16 @@ REVENUE_AGG_SQL = """
             r.ROUTE_CODE,
             r.ORIGIN,
             r.DESTINATION,
+            b.CONTINENT  AS DESTINATION_CONTINENT,
+		    b.COUNTRY AS DESTINATION_CONUTRY,
+		    b.CITY  AS DESTINATION_CITY,
             r.CLASS,
             r.REVENUE
         FROM routes_add r 
         JOIN AIRPORTS a 
         ON A.IATA_CODE = r.ORIGIN
+        JOIN AIRPORTS b
+	    ON b.IATA_CODE = r.DESTINATION
     )
     SELECT * FROM geo_add
     """

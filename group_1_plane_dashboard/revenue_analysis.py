@@ -67,6 +67,9 @@ def _normalize_columns(df: pl.DataFrame) -> pl.DataFrame:
         pl.col("route").cast(pl.Utf8).alias("route"),
         pl.col("origin").cast(pl.Utf8).alias("origin"),
         pl.col("destination").cast(pl.Utf8).alias("destination"),
+        pl.col("destination_continent").cast(pl.Utf8).alias("destination_continent"),
+        pl.col("destination_country").cast(pl.Utf8).alias("destination_country"),
+        pl.col("destination_city").cast(pl.Utf8).alias("destination_city"),
         pl.col("class").cast(pl.Utf8).alias("class"),
         pl.col("revenue").cast(pl.Float64).alias("revenue"),
     )
@@ -96,7 +99,7 @@ def most_profitable_outgoing_route(
 ) -> pl.DataFrame:
     return (
         _filter_by_date_range(df, start, end)
-        .group_by("route", "destination")
+        .group_by("route","city","country","destination_city","destination_country")
         .agg(pl.col("revenue").sum().alias("total_revenue"))
         .sort("total_revenue", descending=True)
         .limit(1)

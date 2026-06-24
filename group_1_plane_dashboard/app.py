@@ -14,12 +14,25 @@ from analysis.staff import (
     understaffing_by_route,
     temporal_understaffing,
 )
+
+from revenue_analysis import (
+    load_revenue_data,
+    most_profitable_outgoing_route,
+    most_revenue_perceived,
+    revenue_class_analysis,
+    revenue_per_country,
+    revenue_trend_analysis,
+    total_revenue_per_range,
+)
+
 import db.tickets as db_tickets
 import db.staff as db_staff
 
 DB_URL = "db2+ibm_db://attgrp1:bigdata@52.211.123.34:25010/ATTPLANE"
 SCHEMA = "ATTGRP1"
 DATA_DIR = Path(__file__).parent / "data"
+
+ALL_OPTION = "All"
 
 TICKETS_AGG_SQL = f"""
 SELECT
@@ -72,6 +85,16 @@ def get_staff_data() -> tuple[pl.DataFrame, pl.DataFrame]:
         with st.spinner("Loading staff data from database (first run only)..."):
             db_staff.fetch_and_save()
     return load_staff_flights(), load_crew_gaps()
+
+
+@st.cache_data(show_spinner="Loading revenue data...")
+def get_revenue_data() -> pl.DataFrame:
+    df = pl.DataFrame()
+    try:
+        df = load_revenue_data()
+    except Exception:
+        pass
+    return df
 
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
@@ -266,250 +289,470 @@ with tab1:
         "enriched with ATTGRP1.AIRPORTS geographic data."
     )
 
-
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 2 — Staff Occupation
 # ══════════════════════════════════════════════════════════════════════════════
 
-with tab2:
-    staff_flights_raw, crew_gaps_raw = get_staff_data()
+# with tab2:
+#     staff_flights_raw, crew_gaps_raw = get_staff_data()
 
-    util_df   = staff_utilisation(staff_flights_raw)
-    route_df  = occupation_by_route(staff_flights_raw)
-    gaps_df   = understaffing_by_route(crew_gaps_raw)
-    trend_df  = temporal_understaffing(crew_gaps_raw)
+#     util_df   = staff_utilisation(staff_flights_raw)
+#     route_df  = occupation_by_route(staff_flights_raw)
+#     gaps_df   = understaffing_by_route(crew_gaps_raw)
+#     trend_df  = temporal_understaffing(crew_gaps_raw)
 
-    p90 = float(util_df["p90_threshold"].first())
-    p10 = float(util_df["p10_threshold"].first())
+#     p90 = float(util_df["p90_threshold"].first())
+#     p10 = float(util_df["p10_threshold"].first())
 
-    # ── Sidebar filters (staff tab) ───────────────────────────────────────────
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("Staff filters")
+#     # ── Sidebar filters (staff tab) ───────────────────────────────────────────
+#     st.sidebar.markdown("---")
+#     st.sidebar.subheader("Staff filters")
 
-    all_years = sorted(crew_gaps_raw["year"].unique().to_list())
-    year_range = st.sidebar.select_slider(
-        "Year range", options=all_years, value=(all_years[0], all_years[-1])
-    )
+#     all_years = sorted(crew_gaps_raw["year"].unique().to_list())
 
-    divisions = sorted(staff_flights_raw["division"].drop_nulls().unique().to_list())
-    selected_divisions = st.sidebar.multiselect("Division", divisions, default=divisions)
+#     year_range = st.sidebar.select_slider(
+#         "Year range", options=all_years, value=(all_years[0], all_years[-1])
+#     )
 
-    # Apply filters
-    filtered_staff = staff_flights_raw.filter(
-        pl.col("division").is_in(selected_divisions)
-        & pl.col("departure").dt.year().is_between(year_range[0], year_range[1])
-    )
-    filtered_gaps = crew_gaps_raw.filter(
-        pl.col("year").is_between(year_range[0], year_range[1])
-    )
+#     divisions = sorted(staff_flights_raw["division"].drop_nulls().unique().to_list())
+#     selected_divisions = st.sidebar.multiselect("Division", divisions, default=divisions)
 
-    util_f  = staff_utilisation(filtered_staff)
-    route_f = occupation_by_route(filtered_staff)
-    gaps_f  = understaffing_by_route(filtered_gaps)
-    trend_f = temporal_understaffing(filtered_gaps)
+#     # Apply filters
+#     filtered_staff = staff_flights_raw.filter(
+#         pl.col("division").is_in(selected_divisions)
+#         & pl.col("departure").dt.year().is_between(year_range[0], year_range[1])
+#     )
+#     filtered_gaps = crew_gaps_raw.filter(
+#         pl.col("year").is_between(year_range[0], year_range[1])
+#     )
 
-    # ── Header & KPIs ─────────────────────────────────────────────────────────
-    st.title("Staff Occupation Analysis")
-    st.markdown(
-        "Crew utilisation by route, overworked vs. underused staff, "
-        "and routes where required crew was not met."
-    )
+#     util_f  = staff_utilisation(filtered_staff)
+#     route_f = occupation_by_route(filtered_staff)
+#     gaps_f  = understaffing_by_route(filtered_gaps)
+#     trend_f = temporal_understaffing(filtered_gaps)
 
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Total staff", f"{util_f['empno'].n_unique():,}")
-    k2.metric("Avg flights / staff", f"{util_f['total_flights'].mean():.1f}")
-    k3.metric("Avg hours / staff", f"{util_f['total_hours'].mean():.1f} h")
-    k4.metric(
-        "Routes w/ crew gaps",
-        str(len(gaps_f)),
-    )
+#     # ── Header & KPIs ─────────────────────────────────────────────────────────
+#     st.title("Staff Occupation Analysis")
+#     st.markdown(
+#         "Crew utilisation by route, overworked vs. underused staff, "
+#         "and routes where required crew was not met."
+#     )
 
-    st.divider()
+#     k1, k2, k3, k4 = st.columns(4)
+#     k1.metric("Total staff", f"{util_f['empno'].n_unique():,}")
+#     k2.metric("Avg flights / staff", f"{util_f['total_flights'].mean():.1f}")
+#     k3.metric("Avg hours / staff", f"{util_f['total_hours'].mean():.1f} h")
+#     k4.metric(
+#         "Routes w/ crew gaps",
+#         str(len(gaps_f)),
+#     )
 
-    # ── Chart 1: Occupation rate by route ─────────────────────────────────────
-    st.subheader("Staff Occupation Rate by Route")
-    st.caption("Average crew-hours per staff member assigned to each route (top 20).")
+#     st.divider()
 
-    top_routes = route_f.head(20)
-    route_fig = px.bar(
-        top_routes.to_pandas(),
-        x="avg_hours_per_staff",
-        y="route_label",
-        orientation="h",
-        color_discrete_sequence=["#4C78A8"],
-        hover_data={
-            "unique_staff": True,
-            "total_flights": True,
-            "total_crew_hours": ":.0f",
-            "avg_flights_per_staff": ":.1f",
-        },
-        labels={
-            "avg_hours_per_staff": "Avg Hours per Staff",
-            "route_label": "",
-            "avg_flights_per_staff": "Avg Flights / Staff",
-            "unique_staff": "Unique Staff",
-            "total_flights": "Total Flights",
-            "total_crew_hours": "Total Crew Hours",
-        },
-    )
-    route_fig.update_layout(
-        yaxis={"categoryorder": "total ascending"},
-        xaxis={"showgrid": False},
-    )
-    st.plotly_chart(route_fig, width="stretch")
+#     # ── Chart 1: Occupation rate by route ─────────────────────────────────────
+#     st.subheader("Staff Occupation Rate by Route")
+#     st.caption("Average crew-hours per staff member assigned to each route (top 20).")
 
-    st.divider()
+#     top_routes = route_f.head(20)
+#     route_fig = px.bar(
+#         top_routes.to_pandas(),
+#         x="avg_hours_per_staff",
+#         y="route_label",
+#         orientation="h",
+#         color_discrete_sequence=["#4C78A8"],
+#         hover_data={
+#             "unique_staff": True,
+#             "total_flights": True,
+#             "total_crew_hours": ":.0f",
+#             "avg_flights_per_staff": ":.1f",
+#         },
+#         labels={
+#             "avg_hours_per_staff": "Avg Hours per Staff",
+#             "route_label": "",
+#             "avg_flights_per_staff": "Avg Flights / Staff",
+#             "unique_staff": "Unique Staff",
+#             "total_flights": "Total Flights",
+#             "total_crew_hours": "Total Crew Hours",
+#         },
+#     )
+#     route_fig.update_layout(
+#         yaxis={"categoryorder": "total ascending"},
+#         xaxis={"showgrid": False},
+#     )
+#     st.plotly_chart(route_fig, width="stretch")
 
-    # ── Chart 2: Utilisation distribution ────────────────────────────────────
-    st.subheader("Staff Utilisation Distribution")
-    st.caption(
-        f"Distribution of total flight hours per employee. "
-        f"P90 threshold = {p90:.0f} h (overused) · P10 = {p10:.0f} h (underused)."
-    )
+#     st.divider()
 
-    hist_fig = px.histogram(
-        util_f.to_pandas(),
-        x="total_hours",
-        nbins=40,
-        color_discrete_sequence=["#4C78A8"],
-        labels={"total_hours": "Total Flight Hours"},
-    )
-    hist_fig.add_vline(x=p90, line_dash="dash", line_color="red",
-                       annotation_text=f"P90 ({p90:.0f} h)", annotation_position="top right")
-    hist_fig.add_vline(x=p10, line_dash="dash", line_color="orange",
-                       annotation_text=f"P10 ({p10:.0f} h)", annotation_position="top left")
-    st.plotly_chart(hist_fig, width="stretch")
+#     # ── Chart 2: Utilisation distribution ────────────────────────────────────
+#     st.subheader("Staff Utilisation Distribution")
+#     st.caption(
+#         f"Distribution of total flight hours per employee. "
+#         f"P90 threshold = {p90:.0f} h (overused) · P10 = {p10:.0f} h (underused)."
+#     )
 
-    col_over, col_under = st.columns(2)
+#     hist_fig = px.histogram(
+#         util_f.to_pandas(),
+#         x="total_hours",
+#         nbins=40,
+#         color_discrete_sequence=["#4C78A8"],
+#         labels={"total_hours": "Total Flight Hours"},
+#     )
+#     hist_fig.add_vline(x=p90, line_dash="dash", line_color="red",
+#                        annotation_text=f"P90 ({p90:.0f} h)", annotation_position="top right")
+#     hist_fig.add_vline(x=p10, line_dash="dash", line_color="orange",
+#                        annotation_text=f"P10 ({p10:.0f} h)", annotation_position="top left")
+#     st.plotly_chart(hist_fig, width="stretch")
 
-    with col_over:
-        st.subheader(f"Overworked Staff (≥ P90: {p90:.0f} h)")
-        overused = (
-            util_f.filter(pl.col("is_overused"))
-            .select("firstnme", "lastname", "division", "department",
-                    "total_flights", "total_hours", "unique_routes")
-            .sort("total_hours", descending=True)
+#     col_over, col_under = st.columns(2)
+
+#     with col_over:
+#         st.subheader(f"Overworked Staff (≥ P90: {p90:.0f} h)")
+#         overused = (
+#             util_f.filter(pl.col("is_overused"))
+#             .select("firstnme", "lastname", "division", "department",
+#                     "total_flights", "total_hours", "unique_routes")
+#             .sort("total_hours", descending=True)
+#         )
+#         st.caption(f"{len(overused)} employees above the 90th percentile.")
+#         st.dataframe(
+#             overused.rename({
+#                 "firstnme": "First", "lastname": "Last",
+#                 "division": "Division", "department": "Department",
+#                 "total_flights": "Flights", "total_hours": "Hours",
+#                 "unique_routes": "Routes",
+#             }).to_pandas(),
+#             width="stretch",
+#         )
+
+#     with col_under:
+#         st.subheader(f"Underused Staff (≤ P10: {p10:.0f} h)")
+#         underused = (
+#             util_f.filter(pl.col("is_underused"))
+#             .select("firstnme", "lastname", "division", "department",
+#                     "total_flights", "total_hours", "unique_routes")
+#             .sort("total_hours")
+#         )
+#         st.caption(f"{len(underused)} employees below the 10th percentile.")
+#         st.dataframe(
+#             underused.rename({
+#                 "firstnme": "First", "lastname": "Last",
+#                 "division": "Division", "department": "Department",
+#                 "total_flights": "Flights", "total_hours": "Hours",
+#                 "unique_routes": "Routes",
+#             }).to_pandas(),
+#             width="stretch",
+#         )
+
+#     st.divider()
+
+#     # ── Chart 3: Understaffed routes ──────────────────────────────────────────
+#     st.subheader("Routes with Crew Shortfalls")
+#     st.caption(
+#         "Routes where the number of crew assigned was below the aircraft's required crew. "
+#         "Gap rate = total missing crew slots / total required crew slots."
+#     )
+
+#     if len(gaps_f) == 0:
+#         st.info("No crew gaps found for the selected filters.")
+#     else:
+#         top_gaps = gaps_f.head(20)
+#         gap_fig = px.bar(
+#             top_gaps.to_pandas(),
+#             x="total_crew_gap",
+#             y="route_label",
+#             orientation="h",
+#             color="gap_rate_pct",
+#             color_continuous_scale="Reds",
+#             hover_data={
+#                 "total_flights": True,
+#                 "total_required_crew": True,
+#                 "total_actual_crew": True,
+#                 "months_understaffed": True,
+#                 "gap_rate_pct": ":.1f",
+#             },
+#             labels={
+#                 "total_crew_gap": "Total Missing Crew Slots",
+#                 "route_label": "",
+#                 "gap_rate_pct": "Gap Rate (%)",
+#                 "total_flights": "Total Flights",
+#                 "total_required_crew": "Required Crew",
+#                 "total_actual_crew": "Actual Crew",
+#                 "months_understaffed": "Months Understaffed",
+#             },
+#         )
+#         gap_fig.update_layout(yaxis={"categoryorder": "total ascending"})
+#         st.plotly_chart(gap_fig, width="stretch")
+
+#     st.divider()
+
+#     # ── Chart 4: Monthly understaffing trend ──────────────────────────────────
+#     st.subheader("Monthly Crew Gap Trend")
+#     st.caption("Total missing crew slots across all routes per month — reveals seasonal peaks.")
+
+#     if len(trend_f) == 0:
+#         st.info("No trend data available for the selected filters.")
+#     else:
+#         trend_fig = px.line(
+#             trend_f.to_pandas(),
+#             x="period",
+#             y="total_crew_gap",
+#             markers=True,
+#             labels={
+#                 "period": "Month",
+#                 "total_crew_gap": "Total Missing Crew Slots",
+#             },
+#         )
+#         trend_fig.update_layout(xaxis_tickangle=-45)
+#         st.plotly_chart(trend_fig, width="stretch")
+
+#     st.divider()
+
+#     # ── Full utilisation table ────────────────────────────────────────────────
+#     st.subheader("Full Staff Utilisation Table")
+#     full_table = (
+#         util_f
+#         .select("firstnme", "lastname", "division", "department",
+#                 "total_flights", "total_hours", "unique_routes",
+#                 "is_overused", "is_underused")
+#         .rename({
+#             "firstnme": "First", "lastname": "Last",
+#             "division": "Division", "department": "Department",
+#             "total_flights": "Flights", "total_hours": "Hours",
+#             "unique_routes": "Routes",
+#             "is_overused": "Overused (P90+)", "is_underused": "Underused (P10-)",
+#         })
+#         .to_pandas()
+#     )
+#     st.dataframe(full_table, width="stretch")
+#     st.download_button(
+#         "Download staff utilisation CSV",
+#         data=full_table.to_csv(index=False),
+#         file_name="staff_utilisation.csv",
+#         mime="text/csv",
+#     )
+
+#     st.caption(
+#         "Data source: ATTGRP1.FLIGHT_CREW joined with ATTGRP1.STAFF and ATTGRP1.ROUTES. "
+#         "Crew gaps derived from ATTGRP1.FLIGHTS × ATTGRP1.AIRPLANES.CREW_MEMBERS."
+#     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 3 — Revenue Analysis (unchanged)
+# ══════════════════════════════════════════════════════════════════════════════
+with tab3:
+    def format_revenue(value: float | int | None) -> str:
+        if value is None:
+            return "0"
+        return f"{float(value):,.0f}"
+
+
+    def select_options(df: pl.DataFrame, column: str) -> list[str]:
+        if df.is_empty():
+            return [ALL_OPTION]
+
+        values = (
+            df.select(pl.col(column).drop_nulls().unique().sort())
+            .to_series()
+            .to_list()
         )
-        st.caption(f"{len(overused)} employees above the 90th percentile.")
-        st.dataframe(
-            overused.rename({
-                "firstnme": "First", "lastname": "Last",
-                "division": "Division", "department": "Department",
-                "total_flights": "Flights", "total_hours": "Hours",
-                "unique_routes": "Routes",
-            }).to_pandas(),
-            width="stretch",
-        )
+        return [ALL_OPTION, *[str(value) for value in values]]
 
-    with col_under:
-        st.subheader(f"Underused Staff (≤ P10: {p10:.0f} h)")
-        underused = (
-            util_f.filter(pl.col("is_underused"))
-            .select("firstnme", "lastname", "division", "department",
-                    "total_flights", "total_hours", "unique_routes")
-            .sort("total_hours")
-        )
-        st.caption(f"{len(underused)} employees below the 10th percentile.")
-        st.dataframe(
-            underused.rename({
-                "firstnme": "First", "lastname": "Last",
-                "division": "Division", "department": "Department",
-                "total_flights": "Flights", "total_hours": "Hours",
-                "unique_routes": "Routes",
-            }).to_pandas(),
-            width="stretch",
-        )
 
-    st.divider()
+    def apply_dimension_filters(
+        df: pl.DataFrame,
+        continent: str = ALL_OPTION,
+        country: str = ALL_OPTION,
+        city: str = ALL_OPTION,
+    ) -> pl.DataFrame:
+        filtered = df
 
-    # ── Chart 3: Understaffed routes ──────────────────────────────────────────
-    st.subheader("Routes with Crew Shortfalls")
-    st.caption(
-        "Routes where the number of crew assigned was below the aircraft's required crew. "
-        "Gap rate = total missing crew slots / total required crew slots."
-    )
+        if continent != ALL_OPTION:
+            filtered = filtered.filter(pl.col("continent") == continent)
+        if country != ALL_OPTION:
+            filtered = filtered.filter(pl.col("country") == country)
+        if city != ALL_OPTION:
+            filtered = filtered.filter(pl.col("city") == city)
 
-    if len(gaps_f) == 0:
-        st.info("No crew gaps found for the selected filters.")
-    else:
-        top_gaps = gaps_f.head(20)
-        gap_fig = px.bar(
-            top_gaps.to_pandas(),
-            x="total_crew_gap",
-            y="route_label",
-            orientation="h",
-            color="gap_rate_pct",
-            color_continuous_scale="Reds",
-            hover_data={
-                "total_flights": True,
-                "total_required_crew": True,
-                "total_actual_crew": True,
-                "months_understaffed": True,
-                "gap_rate_pct": ":.1f",
-            },
-            labels={
-                "total_crew_gap": "Total Missing Crew Slots",
-                "route_label": "",
-                "gap_rate_pct": "Gap Rate (%)",
-                "total_flights": "Total Flights",
-                "total_required_crew": "Required Crew",
-                "total_actual_crew": "Actual Crew",
-                "months_understaffed": "Months Understaffed",
-            },
-        )
-        gap_fig.update_layout(yaxis={"categoryorder": "total ascending"})
-        st.plotly_chart(gap_fig, width="stretch")
+        return filtered
 
-    st.divider()
 
-    # ── Chart 4: Monthly understaffing trend ──────────────────────────────────
-    st.subheader("Monthly Crew Gap Trend")
-    st.caption("Total missing crew slots across all routes per month — reveals seasonal peaks.")
+    def date_bounds(df: pl.DataFrame):
+        bounds = df.select(
+            pl.col("year_month").min().alias("start_date"),
+            pl.col("year_month").max().alias("end_date"),
+        ).row(0, named=True)
 
-    if len(trend_f) == 0:
-        st.info("No trend data available for the selected filters.")
-    else:
-        trend_fig = px.line(
-            trend_f.to_pandas(),
-            x="period",
-            y="total_crew_gap",
-            markers=True,
-            labels={
-                "period": "Month",
-                "total_crew_gap": "Total Missing Crew Slots",
-            },
-        )
-        trend_fig.update_layout(xaxis_tickangle=-45)
-        st.plotly_chart(trend_fig, width="stretch")
+        return bounds["start_date"], bounds["end_date"]
 
-    st.divider()
 
-    # ── Full utilisation table ────────────────────────────────────────────────
-    st.subheader("Full Staff Utilisation Table")
-    full_table = (
-        util_f
-        .select("firstnme", "lastname", "division", "department",
-                "total_flights", "total_hours", "unique_routes",
-                "is_overused", "is_underused")
-        .rename({
-            "firstnme": "First", "lastname": "Last",
-            "division": "Division", "department": "Department",
-            "total_flights": "Flights", "total_hours": "Hours",
-            "unique_routes": "Routes",
-            "is_overused": "Overused (P90+)", "is_underused": "Underused (P10-)",
-        })
-        .to_pandas()
-    )
-    st.dataframe(full_table, width="stretch")
-    st.download_button(
-        "Download staff utilisation CSV",
-        data=full_table.to_csv(index=False),
-        file_name="staff_utilisation.csv",
-        mime="text/csv",
-    )
+    def first_row(df: pl.DataFrame) -> dict:
+        if df.is_empty():
+            return {}
 
-    st.caption(
-        "Data source: ATTGRP1.FLIGHT_CREW joined with ATTGRP1.STAFF and ATTGRP1.ROUTES. "
-        "Crew gaps derived from ATTGRP1.FLIGHTS × ATTGRP1.AIRPLANES.CREW_MEMBERS."
-    )
+        return df.row(0, named=True)
 
+
+    def build_revenue_tab() -> None:
+        df = get_revenue_data()
+
+        revenue_tab, = st.tabs(["Revenue"])
+
+        with revenue_tab:
+            st.title("Revenue")
+
+            filter_container = st.container()
+            with filter_container:
+                st.subheader("Filters")
+                filter_cols = st.columns(5)
+
+                continent = filter_cols[0].selectbox(
+                    "Continent",
+                    select_options(df, "continent"),
+                )
+
+                country_base = apply_dimension_filters(df, continent=continent)
+                country = filter_cols[1].selectbox(
+                    "Country",
+                    select_options(country_base, "country"),
+                )
+
+                city_base = apply_dimension_filters(
+                    df,
+                    continent=continent,
+                    country=country,
+                )
+                city = filter_cols[2].selectbox(
+                    "City",
+                    select_options(city_base, "city"),
+                )
+
+                location_filtered = apply_dimension_filters(
+                    df,
+                    continent=continent,
+                    country=country,
+                    city=city,
+                )
+
+                if location_filtered.is_empty():
+                    st.warning("No revenue data matches the selected filters.")
+                    return
+
+                min_date, max_date = date_bounds(location_filtered)
+                start_date = filter_cols[3].date_input(
+                    "Start date",
+                    value=min_date,
+                    min_value=min_date,
+                    max_value=max_date,
+                )
+                end_date = filter_cols[4].date_input(
+                    "End date",
+                    value=max_date,
+                    min_value=min_date,
+                    max_value=max_date,
+                )
+
+                if start_date > end_date:
+                    st.warning("Start date must be before or equal to end date.")
+                    return
+
+            start = start_date.isoformat()
+            end = end_date.isoformat()
+
+            total_revenue = total_revenue_per_range(location_filtered, start, end)
+            top_route = first_row(
+                most_profitable_outgoing_route(location_filtered, start, end)
+            )
+            top_city = first_row(most_revenue_perceived(location_filtered, start, end))
+
+            metric_cols = st.columns(3)
+            metric_cols[0].metric("Total revenue", format_revenue(total_revenue))
+
+            route_label = top_route.get("route", "No route")
+            route_revenue = format_revenue(top_route.get("total_revenue"))
+            if top_route.get("destination"):
+                route_label = f"{route_label}  from {top_route['city']}, {top_route['country']} to {top_route['destination_city']}, {top_route['destination_country']} "
+            metric_cols[1].metric("Most profitable outgoing route", route_label, route_revenue)
+
+            city_label = "No city"
+            if top_city:
+                city_label = f"{top_city.get('city')}, {top_city.get('country')}"
+            metric_cols[2].metric(
+                "Most revenue perceived",
+                city_label,
+                format_revenue(top_city.get("total_revenue")),
+            )
+
+            trend_df = revenue_trend_analysis(location_filtered, start, end)
+            if trend_df.is_empty():
+                st.info("No revenue trend data is available for this selection.")
+            else:
+                trend_fig = px.line(
+                    trend_df.to_pandas(),
+                    x="year_month",
+                    y="total_revenue",
+                    markers=True,
+                    labels={
+                        "year_month": "Month",
+                        "total_revenue": "Revenue",
+                    },
+                )
+                trend_fig.update_layout(
+                    title="Revenue Trend",
+                    hovermode="x unified",
+                    margin=dict(l=0, r=0, t=48, b=0),
+                )
+                st.plotly_chart(trend_fig, use_container_width=True)
+
+            chart_cols = st.columns([1, 1.4])
+
+            class_df = revenue_class_analysis(location_filtered, start, end)
+            with chart_cols[0]:
+                if class_df.is_empty():
+                    st.info("No class revenue data is available for this selection.")
+                else:
+                    class_fig = px.pie(
+                        class_df.to_pandas(),
+                        names="class",
+                        values="total_revenue",
+                        hole=0.58,
+                        labels={
+                            "class": "Class",
+                            "total_revenue": "Revenue",
+                        },
+                    )
+                    class_fig.update_traces(
+                        textposition="inside",
+                        texttemplate="%{label}<br>%{percent:.1%}",
+                        hovertemplate="<b>%{label}</b><br>Revenue: %{value:,.0f}<br>Share: %{percent}<extra></extra>",
+                    )
+                    class_fig.update_layout(
+                        title="Revenue by Class",
+                        margin=dict(l=0, r=0, t=48, b=0),
+                        showlegend=True,
+                    )
+                    st.plotly_chart(class_fig, use_container_width=True)
+
+            country_df = revenue_per_country(location_filtered, start, end)
+            with chart_cols[1]:
+                if country_df.is_empty():
+                    st.info("No country revenue data is available for this selection.")
+                else:
+                    map_fig = px.choropleth(
+                        country_df.to_pandas(),
+                        locations="country",
+                        locationmode="country names",
+                        color="total_revenue",
+                        hover_name="country",
+                        color_continuous_scale="YlOrRd",
+                        labels={"total_revenue": "Revenue"},
+                        projection="natural earth",
+                    )
+                    map_fig.update_layout(
+                        title="Revenue by Country",
+                        margin=dict(l=0, r=0, t=48, b=0),
+                    )
+                    st.plotly_chart(map_fig, use_container_width=True)
+
+
+    build_revenue_tab()
