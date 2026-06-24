@@ -76,7 +76,7 @@ def get_staff_data() -> tuple[pl.DataFrame, pl.DataFrame]:
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 
-tab1, tab2 = st.tabs(["Revenue & Tax", "Staff Occupation"])
+tab1, tab2, tab3 = st.tabs(["Revenue & Tax", "Staff Occupation", "Revenue Anlaysis"])
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -512,3 +512,4 @@ with tab2:
         "Data source: ATTGRP1.FLIGHT_CREW joined with ATTGRP1.STAFF and ATTGRP1.ROUTES. "
         "Crew gaps derived from ATTGRP1.FLIGHTS × ATTGRP1.AIRPLANES.CREW_MEMBERS."
     )
+

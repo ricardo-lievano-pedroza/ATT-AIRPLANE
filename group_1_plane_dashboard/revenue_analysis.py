@@ -156,7 +156,4 @@ def revenue_per_country(
     )
 
 
-# Backward-compatible aliases for the original misspelled names.
-most_revenue_percieved = most_revenue_perceived
-revenue_trend_anlaysis = revenue_trend_analysis
-revenue_class_anlaysis = revenue_class_analysis
+
