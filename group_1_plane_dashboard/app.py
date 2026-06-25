@@ -51,7 +51,7 @@ st.set_page_config(
     page_title="ATT Group 1 Dashboard",
     layout="wide",
 )
-
+st.title("IE AIRPLANES ✈️")
 
 # ── Data loaders with DB fallback ─────────────────────────────────────────────
 
@@ -102,6 +102,13 @@ def get_revenue_data() -> pl.DataFrame:
 tab1, tab2, tab3 = st.tabs(["Revenue & Tax", "Staff Occupation", "Revenue Anlaysis"])
 
 
+def multiselect_with_all(container, label: str, options: list[str]) -> list[str]:
+    """Multiselect dropdown with every option selected by default. Leaving the
+    selection empty is treated as selecting every option."""
+    selected = container.multiselect(label, options, default=options)
+    return selected or options
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — Revenue & Tax (unchanged)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -109,37 +116,36 @@ tab1, tab2, tab3 = st.tabs(["Revenue & Tax", "Staff Occupation", "Revenue Anlays
 with tab1:
     df = get_ticket_data()
 
-    st.sidebar.title("Filters")
-
-    continents = sorted(df["origin_continent"].drop_nulls().unique().to_list())
-    selected_continents = st.sidebar.multiselect(
-        "Continent", continents, default=continents
-    )
-
-    countries = sorted(
-        df.filter(pl.col("origin_continent").is_in(selected_continents))
-        ["origin_country"].drop_nulls().unique().to_list()
-    )
-    selected_countries = st.sidebar.multiselect(
-        "Country", countries, default=countries
-    )
-
-    max_tax = round(float(df["avg_tax_pct"].drop_nulls().max()), 1)
-    tax_range = st.sidebar.slider(
-        "Tax % of ticket price",
-        min_value=0.0,
-        max_value=max_tax,
-        value=(0.0, max_tax),
-        step=0.1,
-    )
-
-    filtered = filter_data(df, selected_continents, selected_countries, tax_range)
-
     st.title("Airport & Tax Impact Dashboard")
     st.markdown(
         "How do **airport taxes and geography** affect ticket prices and route "
         "economics? This dashboard analyses tax burden across origin airports."
     )
+
+    filter_container = st.container()
+    with filter_container:
+        st.subheader("Filters")
+        filter_cols = st.columns(3)
+
+        continents = sorted(df["origin_continent"].drop_nulls().unique().to_list())
+        selected_continents = multiselect_with_all(filter_cols[0], "Continent", continents)
+
+        countries = sorted(
+            df.filter(pl.col("origin_continent").is_in(selected_continents))
+            ["origin_country"].drop_nulls().unique().to_list()
+        )
+        selected_countries = multiselect_with_all(filter_cols[1], "Country", countries)
+
+        max_tax = round(float(df["avg_tax_pct"].drop_nulls().max()), 1)
+        tax_range = filter_cols[2].slider(
+            "Tax % of ticket price",
+            min_value=0.0,
+            max_value=max_tax,
+            value=(0.0, max_tax),
+            step=0.1,
+        )
+
+    filtered = filter_data(df, selected_continents, selected_countries, tax_range)
 
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Total tickets", f"{int(filtered['ticket_count'].sum()):,}")
@@ -596,145 +602,149 @@ with tab3:
     def build_revenue_tab() -> None:
         df = get_revenue_data()
 
-        revenue_tab, = st.tabs(["Revenue"])
+        st.title("Revenue")
+        st.markdown("""How is the revenue behaving over time? Where are the main hubs for departing flights? What type of tickets are our passengers buyin?
+                    This dashboards analyses characterization of the revenue""")
 
-        with revenue_tab:
-            st.title("Revenue")
+        filter_container = st.container()
+        with filter_container:
+            st.subheader("Filters")
+            filter_cols = st.columns(5)
 
-            filter_container = st.container()
-            with filter_container:
-                st.subheader("Filters")
-                filter_cols = st.columns(5)
-
-                continent = filter_cols[0].selectbox(
+            continent = filter_cols[0].selectbox(
                     "Continent",
                     select_options(df, "continent"),
-                )
+            )
 
-                country_base = apply_dimension_filters(df, continent=continent)
-                country = filter_cols[1].selectbox(
+            country_base = apply_dimension_filters(df, continent=continent)
+            country = filter_cols[1].selectbox(
                     "Country",
                     select_options(country_base, "country"),
                 )
 
-                city_base = apply_dimension_filters(
+            city_base = apply_dimension_filters(
                     df,
                     continent=continent,
                     country=country,
                 )
-                city = filter_cols[2].selectbox(
+            city = filter_cols[2].selectbox(
                     "City",
                     select_options(city_base, "city"),
                 )
 
-                location_filtered = apply_dimension_filters(
+            location_filtered = apply_dimension_filters(
                     df,
                     continent=continent,
                     country=country,
                     city=city,
                 )
 
-                if location_filtered.is_empty():
+            if location_filtered.is_empty():
                     st.warning("No revenue data matches the selected filters.")
                     return
 
-                min_date, max_date = date_bounds(location_filtered)
-                start_date = filter_cols[3].date_input(
+            min_date, max_date = date_bounds(location_filtered)
+            start_date = filter_cols[3].date_input(
                     "Start date",
                     value=min_date,
                     min_value=min_date,
                     max_value=max_date,
                 )
-                end_date = filter_cols[4].date_input(
+            end_date = filter_cols[4].date_input(
                     "End date",
                     value=max_date,
                     min_value=min_date,
                     max_value=max_date,
                 )
 
-                if start_date > end_date:
-                    st.warning("Start date must be before or equal to end date.")
-                    return
+            if start_date > end_date:
+                st.warning("Start date must be before or equal to end date.")
+                return
 
-            start = start_date.isoformat()
-            end = end_date.isoformat()
+        start = start_date.isoformat()
+        end = end_date.isoformat()
 
-            total_revenue = total_revenue_per_range(location_filtered, start, end)
-            top_route = first_row(
+        total_revenue = total_revenue_per_range(location_filtered, start, end)
+        top_route = first_row(
                 most_profitable_outgoing_route(location_filtered, start, end)
             )
-            top_city = first_row(most_revenue_perceived(location_filtered, start, end))
+        top_city = first_row(most_revenue_perceived(location_filtered, start, end))
 
-            metric_cols = st.columns(3)
-            metric_cols[0].metric("Total revenue", format_revenue(total_revenue))
+        metric_cols = st.columns(3)
+        metric_cols[0].metric( f"Total revenue", format_revenue(total_revenue))
 
-            route_label = top_route.get("route", "No route")
-            route_revenue = format_revenue(top_route.get("total_revenue"))
-            if top_route.get("destination"):
-                route_label = f"{route_label}  from {top_route['city']}, {top_route['country']} to {top_route['destination_city']}, {top_route['destination_country']} "
-            metric_cols[1].metric("Most profitable outgoing route", route_label, route_revenue)
+        route = top_route.get("route", "No route")
+        route_revenue = format_revenue(top_route.get("total_revenue"))
+        if top_route.get("destination_city"):
+            origin = f"{top_route['city']}"
+            destination = f"{top_route['destination_city']}"
 
-            city_label = "No city"
-            if top_city:
-                city_label = f"{top_city.get('city')}, {top_city.get('country')}"
-            metric_cols[2].metric(
+        metric_cols[1].metric("Most profitable outgoing route", f"{origin} to {destination}", route_revenue)
+        city_label = "No city"
+        if top_city:
+            city_label = f"{top_city.get('city')}, {top_city.get('country').title()}"
+        metric_cols[2].metric(
                 "Most revenue perceived",
                 city_label,
                 format_revenue(top_city.get("total_revenue")),
             )
-
-            trend_df = revenue_trend_analysis(location_filtered, start, end)
-            if trend_df.is_empty():
-                st.info("No revenue trend data is available for this selection.")
-            else:
-                trend_fig = px.line(
-                    trend_df.to_pandas(),
-                    x="year_month",
-                    y="total_revenue",
-                    markers=True,
-                    labels={
-                        "year_month": "Month",
-                        "total_revenue": "Revenue",
+        st.caption(f"From {start} and {end}")
+        trend_df = revenue_trend_analysis(location_filtered, start, end)
+        if trend_df.is_empty():
+            st.info("No revenue trend data is available for this selection.")
+        else:
+            trend_fig = px.line(
+            trend_df.to_pandas(),
+            x="year_month",
+            y="total_revenue",
+            markers=True,
+            labels={
+                    "year_month": "Month",
+                    "total_revenue": "Revenue",
                     },
                 )
-                trend_fig.update_layout(
-                    title="Revenue Trend",
+            trend_fig.update_layout(
+                    title= "Revenue Trend <br>",
                     hovermode="x unified",
-                    margin=dict(l=0, r=0, t=48, b=0),
+                    margin=dict(l=0, r=0, t=50, b=0),
                 )
-                st.plotly_chart(trend_fig, use_container_width=True)
+            st.plotly_chart(trend_fig, use_container_width=True)
+            st.caption("sub")
 
-            chart_cols = st.columns([1, 1.4])
+        chart_cols = st.columns([1, 1.4])
 
-            class_df = revenue_class_analysis(location_filtered, start, end)
-            with chart_cols[0]:
-                if class_df.is_empty():
+        class_df = revenue_class_analysis(location_filtered, start, end)
+        with chart_cols[0]:
+            if class_df.is_empty():
                     st.info("No class revenue data is available for this selection.")
-                else:
-                    class_fig = px.pie(
-                        class_df.to_pandas(),
-                        names="class",
-                        values="total_revenue",
-                        hole=0.58,
-                        labels={
+            else:
+                class_fig = px.pie(
+                    class_df.to_pandas(),
+                    names="class",
+                    values="total_revenue",
+                    hole=0.58,
+                    labels={
                             "class": "Class",
                             "total_revenue": "Revenue",
-                        },
+                    },
+                )
+                class_fig.update_traces(
+                    textposition="inside",
+                    texttemplate="%{label}<br>%{percent:.1%}",
+                    hovertemplate="<b>%{label}</b><br>Revenue: %{value:,.0f}<br>Share: %{percent}<extra></extra>",
                     )
-                    class_fig.update_traces(
-                        textposition="inside",
-                        texttemplate="%{label}<br>%{percent:.1%}",
-                        hovertemplate="<b>%{label}</b><br>Revenue: %{value:,.0f}<br>Share: %{percent}<extra></extra>",
-                    )
-                    class_fig.update_layout(
+                class_fig.update_layout(
                         title="Revenue by Class",
                         margin=dict(l=0, r=0, t=48, b=0),
                         showlegend=True,
                     )
-                    st.plotly_chart(class_fig, use_container_width=True)
+                st.plotly_chart(class_fig, use_container_width=True)
+                class_max = class_df.filter(pl.col('total_revenue') == pl.col('total_revenue').max()).select('class')[0 , 0]
+                classes_dict = {"E": "Economy","B": "Business", "P": "Premium"}
+                st.caption(f"Class attracting the highest revenue: {classes_dict[class_max]}")
 
-            country_df = revenue_per_country(location_filtered, start, end)
-            with chart_cols[1]:
+        country_df = revenue_per_country(location_filtered, start, end)
+        with chart_cols[1]:
                 if country_df.is_empty():
                     st.info("No country revenue data is available for this selection.")
                 else:
@@ -753,6 +763,24 @@ with tab3:
                         margin=dict(l=0, r=0, t=48, b=0),
                     )
                     st.plotly_chart(map_fig, use_container_width=True)
-
+                    country_max = country_df.filter(pl.col('total_revenue') == pl.col('total_revenue').max()).select('country')[0 , 0]
+                    st.caption(f"Country attracting the highest revenue: {country_max.title()}")
 
     build_revenue_tab()
+    st.subheader("Key Findings")
+    st.markdown(
+        """
+- **Revenue seasonality.** The revenue trend shows that during the second and 
+    fourth quarter revenue increaseas, showing evidennce of higer demand during 
+    that time.
+- **Economy class is the higest revenue driver**
+  Most tickets that are sold are for Economy passengers reaching over the 70%
+  of tickets sold.
+- **Airplanes departures are higgly concentrated.** The
+  map reveals how most of the planes come from two specific hubs, United States and France.
+"""
+    )
+    st.caption(
+        "Data source: ATTGRP1.TICKETS aggregated via SQL JOIN with ROUTES, "
+        "enriched with ATTGRP1.AIRPORTS geographic data."
+    )

@@ -68,7 +68,7 @@ def _normalize_columns(df: pl.DataFrame) -> pl.DataFrame:
         pl.col("origin").cast(pl.Utf8).alias("origin"),
         pl.col("destination").cast(pl.Utf8).alias("destination"),
         pl.col("destination_continent").cast(pl.Utf8).alias("destination_continent"),
-        pl.col("destination_country").cast(pl.Utf8).alias("destination_country"),
+        pl.col("destination_conutry").cast(pl.Utf8).alias("destination_country"),
         pl.col("destination_city").cast(pl.Utf8).alias("destination_city"),
         pl.col("class").cast(pl.Utf8).alias("class"),
         pl.col("revenue").cast(pl.Float64).alias("revenue"),
