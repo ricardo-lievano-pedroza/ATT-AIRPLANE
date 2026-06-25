@@ -7,8 +7,7 @@ DATA_DIR = Path(__file__).parent.parent / "data"
 def load_staff_flights() -> pl.DataFrame:
     """Load raw staff-flight assignment fact table and derive flight_hours."""
     return (
-        pl.read_parquet(DATA_DIR / "staff_flights.parquet")
-        .lazy()
+        pl.scan_parquet(DATA_DIR / "staff_flights.parquet")        
         .with_columns(
             pl.col("empno").cast(pl.Int64),
             pl.col("distance").cast(pl.Float64),
@@ -25,8 +24,7 @@ def load_staff_flights() -> pl.DataFrame:
 def load_crew_gaps() -> pl.DataFrame:
     """Load route-month crew gap table."""
     return (
-        pl.read_parquet(DATA_DIR / "crew_gaps.parquet")
-        .lazy()
+        pl.scan_parquet(DATA_DIR / "crew_gaps.parquet")
         .with_columns(
             pl.col("total_flights").cast(pl.Int64),
             pl.col("total_required_crew").cast(pl.Int64),

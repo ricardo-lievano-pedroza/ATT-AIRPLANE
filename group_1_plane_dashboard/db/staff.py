@@ -42,34 +42,33 @@ JOIN {SCHEMA}.ROUTES        r  ON fc.ROUTE_CODE = r.ROUTE_CODE
 # CREW_MEMBERS is counted once per flight — not once per crew row as it would be in a
 # flat LEFT JOIN. The outer query then sums across flights within each route-month.
 CREW_GAPS_SQL = f"""
+WITH used_crew AS (
+    SELECT
+        FLIGHT_ID,
+        ROUTE_CODE,
+        DEPARTURE,                  -- full datetime — this is the key
+        COUNT(*) AS used_crew
+    FROM ATTGRP1.FLIGHT_CREW
+    GROUP BY FLIGHT_ID, ROUTE_CODE, DEPARTURE
+)
+
 SELECT
-    fs.ROUTE_CODE,
+    f.FLIGHT_ID,
+    f.ROUTE_CODE,
     r.ORIGIN,
     r.DESTINATION,
-    YEAR(fs.DEPARTURE)                        AS year,
-    MONTH(fs.DEPARTURE)                       AS month,
-    COUNT(*)                                  AS total_flights,
-    SUM(fs.required_crew)                     AS total_required_crew,
-    SUM(fs.actual_crew)                       AS total_actual_crew,
-    SUM(fs.required_crew - fs.actual_crew)    AS total_crew_gap
-FROM (
-    SELECT
-        f.FLIGHT_ID,
-        f.ROUTE_CODE,
-        f.DEPARTURE,
-        a.CREW_MEMBERS      AS required_crew,
-        COUNT(fc.EMPNO)     AS actual_crew
-    FROM {SCHEMA}.FLIGHTS          f
-    JOIN {SCHEMA}.AIRPLANES        a  ON f.AIRPLANE    = a.AIRCRAFT_REGISTRATION
-    LEFT JOIN {SCHEMA}.FLIGHT_CREW fc ON f.FLIGHT_ID   = fc.FLIGHT_ID
-                                     AND f.ROUTE_CODE  = fc.ROUTE_CODE
-                                     AND f.DEPARTURE   = fc.DEPARTURE
-    GROUP BY f.FLIGHT_ID, f.ROUTE_CODE, f.DEPARTURE, a.CREW_MEMBERS
-) fs
-JOIN {SCHEMA}.ROUTES r ON fs.ROUTE_CODE = r.ROUTE_CODE
-GROUP BY fs.ROUTE_CODE, r.ORIGIN, r.DESTINATION,
-         YEAR(fs.DEPARTURE), MONTH(fs.DEPARTURE)
-HAVING SUM(fs.required_crew - fs.actual_crew) > 0
+    f.DEPARTURE,                    -- keep full datetime here
+    DATE(f.DEPARTURE)               AS departure_date,
+    a.CREW_MEMBERS                  AS required_crew,
+    COALESCE(uc.used_crew, 0)       AS used_crew
+--    a.CREW_MEMBERS - COALESCE(uc.used_crew, 0) AS crew_gap
+
+FROM ATTGRP1.FLIGHTS        f
+JOIN ATTGRP1.AIRPLANES      a   ON f.AIRPLANE       = a.AIRCRAFT_REGISTRATION
+JOIN ATTGRP1.ROUTES         r   ON f.ROUTE_CODE     = r.ROUTE_CODE
+LEFT JOIN used_crew         uc  ON uc.FLIGHT_ID     = f.FLIGHT_ID
+                                AND uc.ROUTE_CODE   = f.ROUTE_CODE
+                                AND uc.DEPARTURE    = f.DEPARTURE  -- exact match on datetime
 """
 
 
