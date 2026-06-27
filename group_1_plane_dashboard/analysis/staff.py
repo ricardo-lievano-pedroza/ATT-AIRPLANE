@@ -45,8 +45,17 @@ def staff_global_kpis(counts_df: pl.DataFrame, assign_df: pl.DataFrame) -> dict:
         .collect()
     )
     
-    avg_km = emp_stats["total_distance"].mean() if len(emp_stats) > 0 else 0
-    avg_hours = (emp_stats["total_minutes"].mean() / 60.0) if len(emp_stats) > 0 else 0
+    max_dep = assign_df["departure"].max()
+    min_dep = assign_df["departure"].min()
+    
+    years = 1.0
+    if max_dep and min_dep:
+        years = (max_dep - min_dep).days / 365.5
+        if years <= 0:
+            years = 1.0
+            
+    avg_km = (emp_stats["total_distance"].mean() / years) if len(emp_stats) > 0 else 0
+    avg_hours = (emp_stats["total_minutes"].mean() / 60.0 / years) if len(emp_stats) > 0 else 0
     
     return {
         "total_staff": total_staff,

@@ -43,6 +43,18 @@ st.set_page_config(
     layout="wide",
 )
 
+st.markdown("""
+    <style>
+    /* Force white text in the sidebar for better contrast against the blue background */
+    [data-testid="stSidebar"] * {
+        color: white !important;
+    }
+    /* Force white text in dropdowns and inputs since they take the blue secondary background */
+    div[data-baseweb="select"] *, div[data-baseweb="input"] * {
+        color: white !important;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # ── Data loaders with DB fallback ─────────────────────────────────────────────
 
@@ -340,37 +352,39 @@ tab1, tab2, tab3 = st.tabs(["Revenue & Tax", "Staff Occupation", "Revenue Analys
 with tab1:
     df = get_ticket_data()
 
-    st.sidebar.title("Filters")
-
-    continents = sorted(df["origin_continent"].drop_nulls().unique().to_list())
-    selected_continents = st.sidebar.multiselect(
-        "Continent", continents, default=continents
-    )
-
-    countries = sorted(
-        df.filter(pl.col("origin_continent").is_in(selected_continents))
-        ["origin_country"].drop_nulls().unique().to_list()
-    )
-    selected_countries = st.sidebar.multiselect(
-        "Country", countries, default=countries
-    )
-
-    max_tax = round(float(df["avg_tax_pct"].drop_nulls().max()), 1)
-    tax_range = st.sidebar.slider(
-        "Tax % of ticket price",
-        min_value=0.0,
-        max_value=max_tax,
-        value=(0.0, max_tax),
-        step=0.1,
-    )
-
-    filtered = filter_data(df, selected_continents, selected_countries, tax_range)
-
     st.title("Airport & Tax Impact Dashboard")
     st.markdown(
         "How do **airport taxes and geography** affect ticket prices and route "
         "economics? This dashboard analyses tax burden across origin airports."
     )
+
+    with st.container():
+        st.subheader("Filters")
+        f_col1, f_col2, f_col3 = st.columns(3)
+        
+        continents = sorted(df["origin_continent"].drop_nulls().unique().to_list())
+        selected_continents = f_col1.multiselect(
+            "Continent", continents, default=continents
+        )
+
+        countries = sorted(
+            df.filter(pl.col("origin_continent").is_in(selected_continents))
+            ["origin_country"].drop_nulls().unique().to_list()
+        )
+        selected_countries = f_col2.multiselect(
+            "Country", countries, default=countries
+        )
+
+        max_tax = round(float(df["avg_tax_pct"].drop_nulls().max()), 1)
+        tax_range = f_col3.slider(
+            "Tax % of ticket price",
+            min_value=0.0,
+            max_value=max_tax,
+            value=(0.0, max_tax),
+            step=0.1,
+        )
+
+    filtered = filter_data(df, selected_continents, selected_countries, tax_range)
 
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Total tickets", f"{int(filtered['ticket_count'].sum()):,}")
@@ -531,14 +545,20 @@ with tab2:
         st.warning("Missing staff data Parquet files. Please run the extraction script manually (e.g. `python -m group_1_plane_dashboard.db.staff`) before using the dashboard.")
     else:
 
-        # ── Sidebar filters (staff tab) ───────────────────────────────────────────
-        st.sidebar.markdown("---")
-        st.sidebar.subheader("Staff filters")
-
-        all_years = sorted(assign_raw["year"].drop_nulls().unique().to_list())
-        year_range = st.sidebar.select_slider(
-            "Year range", options=all_years, value=(all_years[0], all_years[-1])
+        # ── Header & Filters ───────────────────────────────────────────────
+        st.title("Staff Occupation & Requirements")
+        st.markdown(
+            "Comprehensive analysis of staff deployment, aircraft requirements, "
+            "route gaps, and employee utilisation."
         )
+
+        with st.container():
+            st.subheader("Staff filters")
+
+            all_years = sorted(assign_raw["year"].drop_nulls().unique().to_list())
+            year_range = st.select_slider(
+                "Year range", options=all_years, value=(all_years[0], all_years[-1])
+            )
 
         # Apply filters
         filtered_assign = assign_raw.filter(
@@ -557,17 +577,11 @@ with tab2:
         temporal_hours = flying_hours_over_time(filtered_assign)
         util_df = staff_utilisation(filtered_assign)
 
-        # ── Header & KPIs ─────────────────────────────────────────────────────────
-        st.title("Staff Occupation & Requirements")
-        st.markdown(
-            "Comprehensive analysis of staff deployment, aircraft requirements, "
-            "route gaps, and employee utilisation."
-        )
-
+        # ── KPIs ─────────────────────────────────────────────────────────
         k1, k2, k3 = st.columns(3)
         k1.metric("Total Staff", f"{kpis['total_staff']:,}")
-        k2.metric("Avg Distance per Staff", f"{kpis['avg_km_per_staff']:,.1f} km")
-        k3.metric("Avg Hours per Staff", f"{kpis['avg_hours_per_staff']:,.1f} h")
+        k2.metric("Avg Distance / Staff / Year", f"{kpis['avg_km_per_staff']:,.1f} km")
+        k3.metric("Avg Hours / Staff / Year", f"{kpis['avg_hours_per_staff']:,.1f} h")
 
         st.divider()
 
@@ -590,44 +604,7 @@ with tab2:
 
         st.divider()
 
-        # ── Chart: Routes Understaffed vs Overstaffed ─────────────────────────────
-        st.subheader("Route Staffing Needs")
-        st.caption(
-            "Routes with Crew Gaps (Positive = Missing Crew, Negative = Overstaffed)."
-        )
 
-        col_under, col_over = st.columns(2)
-        with col_under:
-            st.markdown("**Most Understaffed Routes**")
-            understaffed = route_needs.filter(pl.col("crew_gap") > 0).head(15)
-            if len(understaffed) > 0:
-                under_fig = px.bar(
-                    understaffed.to_pandas(),
-                    x="crew_gap", y="route_label", orientation="h",
-                    color="crew_gap", color_continuous_scale="Reds",
-                    labels={"crew_gap": "Missing Crew Slots", "route_label": ""}
-                )
-                under_fig.update_layout(yaxis={"categoryorder": "total ascending"})
-                st.plotly_chart(under_fig, width="stretch")
-            else:
-                st.info("No understaffed routes.")
-
-        with col_over:
-            st.markdown("**Most Overstaffed Routes**")
-            overstaffed = route_needs.filter(pl.col("crew_gap") < 0).sort("crew_gap").head(15)
-            if len(overstaffed) > 0:
-                over_fig = px.bar(
-                    overstaffed.to_pandas(),
-                    x="crew_gap", y="route_label", orientation="h",
-                    color="crew_gap", color_continuous_scale="Blues_r",
-                    labels={"crew_gap": "Surplus Crew Slots", "route_label": ""}
-                )
-                over_fig.update_layout(yaxis={"categoryorder": "total descending"})
-                st.plotly_chart(over_fig, width="stretch")
-            else:
-                st.info("No overstaffed routes.")
-
-        st.divider()
 
         # ── Chart: Department Stats ───────────────────────────────────────────────
         st.subheader("Department Analysis")
@@ -645,7 +622,7 @@ with tab2:
 
         with col_d2:
             d2_fig = px.bar(
-                dept_stats.sort("total_hours_required", descending=True).head(10).to_pandas(),
+                dept_stats.with_columns(pl.col("total_hours_required").fill_null(0)).sort("total_hours_required", descending=True).head(10).to_pandas(),
                 x="total_hours_required", y="department", orientation="h",
                 color_discrete_sequence=["#2ca02c"],
                 labels={"total_hours_required": "Total Hours", "department": ""}
@@ -694,6 +671,19 @@ with tab2:
                 st.dataframe(underworked.to_pandas(), width="stretch")
         else:
             st.info("No staff utilization data for selected filters.")
+
+        st.divider()
+        st.subheader("Key Findings")
+        st.markdown(
+            """
+- **Staff distribution is heavily skewed across departments.** The department analysis charts show that while certain departments contain the vast majority of personnel, others carry a disproportionately high burden of total required flight hours.
+- **Aircraft models dictate crewing requirements.** The aircraft staffing requirements chart reveals distinct differences in the required versus average used crew sizes across different airplane models, highlighting potential areas of over- or under-staffing for specific fleets.
+- **Workloads fluctuate over time.** The temporal flying hours line chart indicates that the average hours logged per staff member vary by month, suggesting periods of peak operational intensity and seasonality.
+- **Staff utilisation is unequal across the workforce.** The staff welfare analysis uses statistical thresholds (P10 and P90) to identify specific employees who are either overworked and require vacation or underused and available for additional assignments.
+
+*Data source: Staff records aggregated via SQL JOINs with aircraft and flight usage data, enriched with department and assignment metrics.*
+            """
+        )
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — Revenue Analysis
