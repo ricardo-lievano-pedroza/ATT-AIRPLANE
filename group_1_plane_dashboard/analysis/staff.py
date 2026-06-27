@@ -7,9 +7,10 @@ def load_staff_counts() -> pl.DataFrame:
     return pl.scan_parquet(DATA_DIR / "q1_staff_counts.parquet").collect()
 
 def load_staff_assignments() -> pl.DataFrame:
+    q2 = pl.scan_parquet(DATA_DIR / "q2_staff_assignments.parquet")
+    
     return (
-        pl.scan_parquet(DATA_DIR / "q2_staff_assignments.parquet")
-        .with_columns(
+        q2.with_columns(
             pl.col("departure").cast(pl.Datetime)
         )
         .with_columns(
@@ -20,9 +21,9 @@ def load_staff_assignments() -> pl.DataFrame:
     )
 
 def load_staff_usage() -> pl.DataFrame:
+    q3 = pl.scan_parquet(DATA_DIR / "q3_staff_usage.parquet")
     return (
-        pl.scan_parquet(DATA_DIR / "q3_staff_usage.parquet")
-        .with_columns(
+        q3.with_columns(
             pl.col("required_crew").cast(pl.Int64),
             pl.col("used_crew").cast(pl.Int64)
         )
@@ -71,21 +72,30 @@ def aircraft_staff_requirements(usage_df: pl.DataFrame) -> pl.DataFrame:
 
 # --- Route Needs ---
 def route_staff_needs(usage_df: pl.DataFrame) -> pl.DataFrame:
-    return (
+    group_cols = ["route_code"]
+    has_orig_dest = "origin" in usage_df.columns and "destination" in usage_df.columns
+    if has_orig_dest:
+        group_cols.extend(["origin", "destination"])
+
+    res = (
         usage_df.lazy()
-        .group_by("route_code", "origin", "destination")
+        .group_by(group_cols)
         .agg(
             pl.len().alias("total_flights"),
             pl.col("required_crew").sum().alias("total_required_crew"),
             pl.col("used_crew").sum().alias("total_actual_crew")
         )
         .with_columns(
-            (pl.col("total_required_crew") - pl.col("total_actual_crew")).alias("crew_gap"),
-            (pl.col("origin") + " → " + pl.col("destination")).alias("route_label")
+            (pl.col("total_required_crew") - pl.col("total_actual_crew")).alias("crew_gap")
         )
-        .sort("crew_gap", descending=True)
-        .collect()
     )
+
+    if has_orig_dest:
+        res = res.with_columns((pl.col("origin") + " → " + pl.col("destination")).alias("route_label"))
+    else:
+        res = res.with_columns(pl.col("route_code").alias("route_label"))
+
+    return res.sort("crew_gap", descending=True).collect()
 
 # --- Department Analysis ---
 def department_stats(counts_df: pl.DataFrame, assign_df: pl.DataFrame) -> pl.DataFrame:
@@ -127,7 +137,7 @@ def flying_hours_over_time(assign_df: pl.DataFrame) -> pl.DataFrame:
 def staff_utilisation(assign_df: pl.DataFrame) -> pl.DataFrame:
     base = (
         assign_df.lazy()
-        .group_by("empno", "firstnme", "lastname", "division", "department")
+        .group_by("empno", "firstnme", "lastname", "department")
         .agg(
             pl.len().alias("total_flights"),
             (pl.col("flight_minutes").sum() / 60.0).alias("total_hours"),

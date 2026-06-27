@@ -11,19 +11,30 @@ GROUP BY
 
 --- avg km and time per staff memember 
 SELECT 
+	s.FIRSTNME,
+	s.LASTNAME,
 	fc.EMPNO,
 	fc.FLIGHT_ID,
 	fc.ROUTE_CODE,
 	fc.DEPARTURE,
-	r.distance,
-	r.minutes 
+	s.DEPARTMENT,
+	sum(r.distance) as distance,
+	sum(r.flight_minutes) as flight_minutes  
 FROM FLIGHT_CREW AS fc
-LEFT JOIN ROUTE AS r ON fc.ROUTE_CODE = r.ROUTE_CODE
+LEFT JOIN ROUTES AS r ON fc.ROUTE_CODE = r.ROUTE_CODE
 LEFT JOIN STAFF AS s ON fc.EMPNO = s.EMPNO
 GROUP BY 
-	FLIGHT_ID,
-	ROUTE_CODE,
-	DEPARTURE
+	s.FIRSTNME,
+	s.LASTNAME,
+	s.DEPARTMENT,
+	fc.EMPNO,
+	fc.FLIGHT_ID,
+	fc.ROUTE_CODE,
+	fc.DEPARTURE
+
+
+
+
 
 
 --- staff usage
@@ -44,6 +55,8 @@ GROUP BY
 SELECT 
 	f.FLIGHT_ID,
 	f.ROUTE_CODE,
+	r.ORIGIN,
+	r.DESTINATION,
 	f.DEPARTURE,
 	f.AIRPLANE,
 	a.CREW_MEMBERS AS REQUIRED_CREW,
@@ -56,6 +69,8 @@ LEFT JOIN fc ON
 	fc.FLIGHT_ID = f.FLIGHT_ID AND
 	fc.ROUTE_CODE = f.ROUTE_CODE AND
 	fc.DEPARTURE = f.DEPARTURE
+LEFT JOIN ROUTES AS r ON f.ROUTE_CODE = r.ROUTE_CODE
+
 
 
 

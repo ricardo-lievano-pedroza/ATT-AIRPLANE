@@ -77,7 +77,8 @@ def get_staff_data() -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
         DATA_DIR / "q3_staff_usage.parquet"
     ]
     if not all(p.exists() for p in needed):
-        return pl.DataFrame(), pl.DataFrame(), pl.DataFrame()
+        st.error("Missing staff data Parquet files. Please run the extraction script manually (e.g. `python -m db.staff`) before using the dashboard.")
+        st.stop()
     return load_staff_counts(), load_staff_assignments(), load_staff_usage()
 
 
@@ -539,13 +540,9 @@ with tab2:
             "Year range", options=all_years, value=(all_years[0], all_years[-1])
         )
 
-        divisions = sorted(assign_raw["division"].drop_nulls().unique().to_list())
-        selected_divisions = st.sidebar.multiselect("Division", divisions, default=divisions)
-
         # Apply filters
         filtered_assign = assign_raw.filter(
-            pl.col("division").is_in(selected_divisions)
-            & pl.col("year").is_between(year_range[0], year_range[1])
+            pl.col("year").is_between(year_range[0], year_range[1])
         )
 
         filtered_usage = usage_raw.filter(

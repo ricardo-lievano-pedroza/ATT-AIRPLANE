@@ -20,64 +20,72 @@ DATA_DIR = Path(__file__).parent.parent / "data"
 # Query 1: Number of staff by department
 Q1_STAFF_COUNTS_SQL = f"""
 SELECT 
-    DEPARTMENT,
-    COUNT(DISTINCT EMPNO) AS STAFF_COUNT
+	DEPARTMENT,
+	COUNT(DISTINCT EMPNO) AS STAFF_COUNT
 FROM {SCHEMA}.STAFF
-GROUP BY DEPARTMENT
+GROUP BY 
+	DEPARTMENT
 """
 
 # Query 2: Staff assignments for distance and time
 Q2_STAFF_ASSIGNMENTS_SQL = f"""
 SELECT 
-    fc.EMPNO,
-    s.FIRSTNME,
-    s.LASTNAME,
-    s.DIVISION,
-    s.DEPARTMENT,
-    fc.FLIGHT_ID,
-    fc.ROUTE_CODE,
-    fc.DEPARTURE,
-    r.DISTANCE,
-    r.FLIGHT_MINUTES 
+	s.FIRSTNME,
+	s.LASTNAME,
+	fc.EMPNO,
+	fc.FLIGHT_ID,
+	fc.ROUTE_CODE,
+	fc.DEPARTURE,
+	s.DEPARTMENT,
+	sum(r.distance) as distance,
+	sum(r.flight_minutes) as flight_minutes  
 FROM {SCHEMA}.FLIGHT_CREW AS fc
 LEFT JOIN {SCHEMA}.ROUTES AS r ON fc.ROUTE_CODE = r.ROUTE_CODE
 LEFT JOIN {SCHEMA}.STAFF AS s ON fc.EMPNO = s.EMPNO
+GROUP BY 
+	s.FIRSTNME,
+	s.LASTNAME,
+	s.DEPARTMENT,
+	fc.EMPNO,
+	fc.FLIGHT_ID,
+	fc.ROUTE_CODE,
+	fc.DEPARTURE
 """
 
 # Query 3: Staff usage vs Required by Aircraft and Route
 Q3_STAFF_USAGE_SQL = f"""
 WITH fc as (
-    SELECT 	
-        FLIGHT_ID,
-        ROUTE_CODE,
-        DEPARTURE,
-        COUNT(DISTINCT EMPNO) as USED_CREW
-    FROM {SCHEMA}.FLIGHT_CREW
-    GROUP BY 
-        FLIGHT_ID,
-        ROUTE_CODE,
-        DEPARTURE
+SELECT 	
+	fc.FLIGHT_ID,
+	fc.ROUTE_CODE,
+	fc.DEPARTURE,
+	COUNT(DISTINCT fc.EMPNO) as USED_CREW
+FROM {SCHEMA}.FLIGHT_CREW AS fc
+GROUP BY 
+	FLIGHT_ID,
+	ROUTE_CODE,
+	DEPARTURE
 )
+
 SELECT 
-    f.FLIGHT_ID,
-    f.ROUTE_CODE,
-    f.DEPARTURE,
-    DATE(f.DEPARTURE) AS DEPARTURE_DATE,
-    r.ORIGIN,
-    r.DESTINATION,
-    f.AIRPLANE,
-    a.CREW_MEMBERS AS REQUIRED_CREW,
-    a.MODEL AS AIRPLANE_MODEL,
-    COALESCE(fc.USED_CREW, 0) AS USED_CREW
+	f.FLIGHT_ID,
+	f.ROUTE_CODE,
+	r.ORIGIN,
+	r.DESTINATION,
+	f.DEPARTURE,
+	f.AIRPLANE,
+	a.CREW_MEMBERS AS REQUIRED_CREW,
+	a.MODEL AS AIRPLANE_MODEL,
+	a.AIRCRAFT_REGISTRATION AS AIRPLANE_REG,
+	fc.USED_CREW
 FROM {SCHEMA}.FLIGHTS AS f 
 LEFT JOIN {SCHEMA}.AIRPLANES AS a ON f.AIRPLANE = a.AIRCRAFT_REGISTRATION
-LEFT JOIN {SCHEMA}.ROUTES r ON f.ROUTE_CODE = r.ROUTE_CODE
 LEFT JOIN fc ON 
-    fc.FLIGHT_ID = f.FLIGHT_ID AND
-    fc.ROUTE_CODE = f.ROUTE_CODE AND
-    fc.DEPARTURE = f.DEPARTURE
+	fc.FLIGHT_ID = f.FLIGHT_ID AND
+	fc.ROUTE_CODE = f.ROUTE_CODE AND
+	fc.DEPARTURE = f.DEPARTURE
+LEFT JOIN {SCHEMA}.ROUTES AS r ON f.ROUTE_CODE = r.ROUTE_CODE
 """
-
 
 def fetch_and_save():
     DATA_DIR.mkdir(exist_ok=True)
@@ -103,17 +111,18 @@ def fetch_and_save():
 
     print("Done.")
 
-
 def _read_sql(sql: str, conn) -> pl.DataFrame:
     """Execute SQL and return a Polars DataFrame, normalising column names."""
     try:
         df = pl.read_database(sql, conn)
-        return df.rename({c: c.lower().strip() for c in df.columns})
-    except Exception:
+        df.columns = [c.lower().strip() for c in df.columns]
+        return df
+    except Exception as exc:
+        print(f"Error executing query:\n{sql}\n\n{exc}")
+        # Return an empty DataFrame or re-raise
         raw = pd.read_sql(sql, conn)
         raw.columns = [c.lower().strip() for c in raw.columns]
         return pl.from_pandas(raw)
-
 
 def test_connection(n: int = 100) -> None:
     """Fetch the first `n` rows of each query, print shape + preview, and exit."""
