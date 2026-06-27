@@ -4,7 +4,7 @@ from pathlib import Path
 import polars as pl
 
 
-DATA_DIR = Path(__file__).parent / "data"
+DATA_DIR = Path(__file__).parent.parent / "data"
 DEFAULT_START = date(2020, 1, 1)
 DEFAULT_END = date(2025, 12, 31)
 
