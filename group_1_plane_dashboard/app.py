@@ -314,249 +314,151 @@ with tab1:
 # TAB 2 — Staff Occupation
 # ══════════════════════════════════════════════════════════════════════════════
 
-# with tab2:
-#     staff_flights_raw, crew_gaps_raw = get_staff_data()
+with tab2:
+    counts_raw, assign_raw, usage_raw = get_staff_data()
+    if counts_raw.is_empty() or assign_raw.is_empty():
+        st.warning("Missing staff data Parquet files. Please run the extraction script manually (e.g. `python -m group_1_plane_dashboard.db.staff`) before using the dashboard.")
+    else:
 
-#     util_df   = staff_utilisation(staff_flights_raw)
-#     route_df  = occupation_by_route(staff_flights_raw)
-#     gaps_df   = understaffing_by_route(crew_gaps_raw)
-#     trend_df  = temporal_understaffing(crew_gaps_raw)
+        # ── Header & Filters ───────────────────────────────────────────────
+        st.title("Staff Occupation & Requirements")
+        st.markdown(
+            "Comprehensive analysis of staff deployment, aircraft requirements, "
+            "route gaps, and employee utilisation."
+        )
 
-#     p90 = float(util_df["p90_threshold"].first())
-#     p10 = float(util_df["p10_threshold"].first())
+        with st.container():
+            st.subheader("Staff filters")
 
-#     # ── Sidebar filters (staff tab) ───────────────────────────────────────────
-#     st.sidebar.markdown("---")
-#     st.sidebar.subheader("Staff filters")
+            all_years = sorted(assign_raw["year"].drop_nulls().unique().to_list())
+            year_range = st.select_slider(
+                "Year range", options=all_years, value=(all_years[0], all_years[-1])
+            )
 
-#     all_years = sorted(crew_gaps_raw["year"].unique().to_list())
+        # Apply filters
+        filtered_assign = assign_raw.filter(
+            pl.col("year").is_between(year_range[0], year_range[1])
+        )
 
-#     year_range = st.sidebar.select_slider(
-#         "Year range", options=all_years, value=(all_years[0], all_years[-1])
-#     )
+        filtered_usage = usage_raw.filter(
+            pl.col("departure").dt.year().is_between(year_range[0], year_range[1])
+        )
 
-#     divisions = sorted(staff_flights_raw["division"].drop_nulls().unique().to_list())
-#     selected_divisions = st.sidebar.multiselect("Division", divisions, default=divisions)
+        # Compute metrics
+        kpis = staff_global_kpis(counts_raw, filtered_assign)
+        aircraft_reqs = aircraft_staff_requirements(filtered_usage)
+        route_needs = route_staff_needs(filtered_usage)
+        dept_stats = department_stats(counts_raw, filtered_assign)
+        temporal_hours = flying_hours_over_time(filtered_assign)
+        util_df = staff_utilisation(filtered_assign)
 
-#     # Apply filters
-#     filtered_staff = staff_flights_raw.filter(
-#         pl.col("division").is_in(selected_divisions)
-#         & pl.col("departure").dt.year().is_between(year_range[0], year_range[1])
-#     )
-#     filtered_gaps = crew_gaps_raw.filter(
-#         pl.col("year").is_between(year_range[0], year_range[1])
-#     )
+        # ── KPIs ─────────────────────────────────────────────────────────
+        k1, k2, k3 = st.columns(3)
+        k1.metric("Total Staff", f"{kpis['total_staff']:,}")
+        k2.metric("Avg Distance / Staff / Year", f"{kpis['avg_km_per_staff']:,.1f} km")
+        k3.metric("Avg Hours / Staff / Year", f"{kpis['avg_hours_per_staff']:,.1f} h")
 
-#     util_f  = staff_utilisation(filtered_staff)
-#     route_f = occupation_by_route(filtered_staff)
-#     gaps_f  = understaffing_by_route(filtered_gaps)
-#     trend_f = temporal_understaffing(filtered_gaps)
+        st.divider()
 
-#     # ── Header & KPIs ─────────────────────────────────────────────────────────
-#     st.title("Staff Occupation Analysis")
-#     st.markdown(
-#         "Crew utilisation by route, overworked vs. underused staff, "
-#         "and routes where required crew was not met."
-#     )
+        # ── Chart: Aircraft Requirements ──────────────────────────────────────────
+        st.subheader("Aircraft Staffing Requirements")
+        st.caption("Which aircraft models require the most vs. least staff, and how well are they supplied?")
 
-#     k1, k2, k3, k4 = st.columns(4)
-#     k1.metric("Total staff", f"{util_f['empno'].n_unique():,}")
-#     k2.metric("Avg flights / staff", f"{util_f['total_flights'].mean():.1f}")
-#     k3.metric("Avg hours / staff", f"{util_f['total_hours'].mean():.1f} h")
-#     k4.metric(
-#         "Routes w/ crew gaps",
-#         str(len(gaps_f)),
-#     )
+        air_fig = px.bar(
+            aircraft_reqs.to_pandas(),
+            x="airplane_model",
+            y=["avg_required_crew", "avg_used_crew"],
+            barmode="group",
+            labels={
+                "airplane_model": "Aircraft Model",
+                "value": "Number of Crew",
+                "variable": "Crew Type"
+            }
+        )
+        st.plotly_chart(air_fig, width="stretch")
 
-#     st.divider()
+        st.divider()
 
-#     # ── Chart 1: Occupation rate by route ─────────────────────────────────────
-#     st.subheader("Staff Occupation Rate by Route")
-#     st.caption("Average crew-hours per staff member assigned to each route (top 20).")
 
-#     top_routes = route_f.head(20)
-#     route_fig = px.bar(
-#         top_routes.to_pandas(),
-#         x="avg_hours_per_staff",
-#         y="route_label",
-#         orientation="h",
-#         color_discrete_sequence=["#4C78A8"],
-#         hover_data={
-#             "unique_staff": True,
-#             "total_flights": True,
-#             "total_crew_hours": ":.0f",
-#             "avg_flights_per_staff": ":.1f",
-#         },
-#         labels={
-#             "avg_hours_per_staff": "Avg Hours per Staff",
-#             "route_label": "",
-#             "avg_flights_per_staff": "Avg Flights / Staff",
-#             "unique_staff": "Unique Staff",
-#             "total_flights": "Total Flights",
-#             "total_crew_hours": "Total Crew Hours",
-#         },
-#     )
-#     route_fig.update_layout(
-#         yaxis={"categoryorder": "total ascending"},
-#         xaxis={"showgrid": False},
-#     )
-#     st.plotly_chart(route_fig, width="stretch")
 
-#     st.divider()
+        # ── Chart: Department Stats ───────────────────────────────────────────────
+        st.subheader("Department Analysis")
+        st.caption("Which departments have the most staff, and which require the most flight hours?")
 
-#     # ── Chart 2: Utilisation distribution ────────────────────────────────────
-#     st.subheader("Staff Utilisation Distribution")
-#     st.caption(
-#         f"Distribution of total flight hours per employee. "
-#         f"P90 threshold = {p90:.0f} h (overused) · P10 = {p10:.0f} h (underused)."
-#     )
+        col_d1, col_d2 = st.columns(2)
+        with col_d1:
+            d1_fig = px.bar(
+                dept_stats.head(10).to_pandas(),
+                x="staff_count", y="department", orientation="h",
+                labels={"staff_count": "Total Staff", "department": ""}
+            )
+            d1_fig.update_layout(yaxis={"categoryorder": "total ascending"})
+            st.plotly_chart(d1_fig, width="stretch", key="dept_staff")
 
-#     hist_fig = px.histogram(
-#         util_f.to_pandas(),
-#         x="total_hours",
-#         nbins=40,
-#         color_discrete_sequence=["#4C78A8"],
-#         labels={"total_hours": "Total Flight Hours"},
-#     )
-#     hist_fig.add_vline(x=p90, line_dash="dash", line_color="red",
-#                        annotation_text=f"P90 ({p90:.0f} h)", annotation_position="top right")
-#     hist_fig.add_vline(x=p10, line_dash="dash", line_color="orange",
-#                        annotation_text=f"P10 ({p10:.0f} h)", annotation_position="top left")
-#     st.plotly_chart(hist_fig, width="stretch")
+        with col_d2:
+            d2_fig = px.bar(
+                dept_stats.with_columns(pl.col("total_hours_required").fill_null(0)).sort("total_hours_required", descending=True).head(10).to_pandas(),
+                x="total_hours_required", y="department", orientation="h",
+                color_discrete_sequence=["#2ca02c"],
+                labels={"total_hours_required": "Total Hours", "department": ""}
+            )
+            d2_fig.update_layout(yaxis={"categoryorder": "total ascending"})
+            st.plotly_chart(d2_fig, width="stretch", key="dept_hours")
 
-#     col_over, col_under = st.columns(2)
+        st.divider()
 
-#     with col_over:
-#         st.subheader(f"Overworked Staff (≥ P90: {p90:.0f} h)")
-#         overused = (
-#             util_f.filter(pl.col("is_overused"))
-#             .select("firstnme", "lastname", "division", "department",
-#                     "total_flights", "total_hours", "unique_routes")
-#             .sort("total_hours", descending=True)
-#         )
-#         st.caption(f"{len(overused)} employees above the 90th percentile.")
-#         st.dataframe(
-#             overused.rename({
-#                 "firstnme": "First", "lastname": "Last",
-#                 "division": "Division", "department": "Department",
-#                 "total_flights": "Flights", "total_hours": "Hours",
-#                 "unique_routes": "Routes",
-#             }).to_pandas(),
-#             width="stretch",
-#         )
+        # ── Chart: Temporal Flying Hours ──────────────────────────────────────────
+        st.subheader("Flying Hours Over Time")
+        st.caption("Average flying hours per staff member per month.")
 
-#     with col_under:
-#         st.subheader(f"Underused Staff (≤ P10: {p10:.0f} h)")
-#         underused = (
-#             util_f.filter(pl.col("is_underused"))
-#             .select("firstnme", "lastname", "division", "department",
-#                     "total_flights", "total_hours", "unique_routes")
-#             .sort("total_hours")
-#         )
-#         st.caption(f"{len(underused)} employees below the 10th percentile.")
-#         st.dataframe(
-#             underused.rename({
-#                 "firstnme": "First", "lastname": "Last",
-#                 "division": "Division", "department": "Department",
-#                 "total_flights": "Flights", "total_hours": "Hours",
-#                 "unique_routes": "Routes",
-#             }).to_pandas(),
-#             width="stretch",
-#         )
+        time_fig = px.line(
+            temporal_hours.to_pandas(),
+            x="period", y="avg_hours_per_staff",
+            markers=True,
+            labels={"period": "Month", "avg_hours_per_staff": "Avg Hours / Staff"}
+        )
+        time_fig.update_layout(xaxis_tickangle=-45)
+        st.plotly_chart(time_fig, width="stretch")
 
-#     st.divider()
+        st.divider()
 
-#     # ── Chart 3: Understaffed routes ──────────────────────────────────────────
-#     st.subheader("Routes with Crew Shortfalls")
-#     st.caption(
-#         "Routes where the number of crew assigned was below the aircraft's required crew. "
-#         "Gap rate = total missing crew slots / total required crew slots."
-#     )
+        # ── Chart: Vacation / Overworked ──────────────────────────────────────────
+        st.subheader("Staff Welfare: Vacations vs More Hours Needed")
 
-#     if len(gaps_f) == 0:
-#         st.info("No crew gaps found for the selected filters.")
-#     else:
-#         top_gaps = gaps_f.head(20)
-#         gap_fig = px.bar(
-#             top_gaps.to_pandas(),
-#             x="total_crew_gap",
-#             y="route_label",
-#             orientation="h",
-#             color="gap_rate_pct",
-#             color_continuous_scale="Reds",
-#             hover_data={
-#                 "total_flights": True,
-#                 "total_required_crew": True,
-#                 "total_actual_crew": True,
-#                 "months_understaffed": True,
-#                 "gap_rate_pct": ":.1f",
-#             },
-#             labels={
-#                 "total_crew_gap": "Total Missing Crew Slots",
-#                 "route_label": "",
-#                 "gap_rate_pct": "Gap Rate (%)",
-#                 "total_flights": "Total Flights",
-#                 "total_required_crew": "Required Crew",
-#                 "total_actual_crew": "Actual Crew",
-#                 "months_understaffed": "Months Understaffed",
-#             },
-#         )
-#         gap_fig.update_layout(yaxis={"categoryorder": "total ascending"})
-#         st.plotly_chart(gap_fig, width="stretch")
+        if len(util_df) > 0:
+            p90 = float(util_df["p90_threshold"].first())
+            p10 = float(util_df["p10_threshold"].first())
+            st.caption(f"Based on total hours. P90 threshold (Overworked) = {p90:.0f}h. P10 threshold (Underused) = {p10:.0f}h.")
 
-#     st.divider()
+            col_overw, col_underw = st.columns(2)
+            with col_overw:
+                st.markdown("**Overworked (Needs Vacation)**")
+                overworked = util_df.filter(pl.col("is_overused")).select(
+                    ["firstnme", "lastname", "department", "total_hours"]
+                )
+                st.dataframe(overworked.to_pandas(), width="stretch")
 
-#     # ── Chart 4: Monthly understaffing trend ──────────────────────────────────
-#     st.subheader("Monthly Crew Gap Trend")
-#     st.caption("Total missing crew slots across all routes per month — reveals seasonal peaks.")
+            with col_underw:
+                st.markdown("**Underused (Needs More Hours)**")
+                underworked = util_df.filter(pl.col("is_underused")).select(
+                    ["firstnme", "lastname", "department", "total_hours"]
+                )
+                st.dataframe(underworked.to_pandas(), width="stretch")
+        else:
+            st.info("No staff utilization data for selected filters.")
 
-#     if len(trend_f) == 0:
-#         st.info("No trend data available for the selected filters.")
-#     else:
-#         trend_fig = px.line(
-#             trend_f.to_pandas(),
-#             x="period",
-#             y="total_crew_gap",
-#             markers=True,
-#             labels={
-#                 "period": "Month",
-#                 "total_crew_gap": "Total Missing Crew Slots",
-#             },
-#         )
-#         trend_fig.update_layout(xaxis_tickangle=-45)
-#         st.plotly_chart(trend_fig, width="stretch")
+        st.divider()
+        st.subheader("Key Findings")
+        st.markdown(
+            """
+- **Staff distribution is heavily skewed across departments.** The department analysis charts show that while certain departments contain the vast majority of personnel, others carry a disproportionately high burden of total required flight hours.
+- **Aircraft models dictate crewing requirements.** The aircraft staffing requirements chart reveals distinct differences in the required versus average used crew sizes across different airplane models, highlighting potential areas of over- or under-staffing for specific fleets.
+- **Workloads fluctuate over time.** The temporal flying hours line chart indicates that the average hours logged per staff member vary by month, suggesting periods of peak operational intensity and seasonality.
+- **Staff utilisation is unequal across the workforce.** The staff welfare analysis uses statistical thresholds (P10 and P90) to identify specific employees who are either overworked and require vacation or underused and available for additional assignments.
 
-#     st.divider()
-
-#     # ── Full utilisation table ────────────────────────────────────────────────
-#     st.subheader("Full Staff Utilisation Table")
-#     full_table = (
-#         util_f
-#         .select("firstnme", "lastname", "division", "department",
-#                 "total_flights", "total_hours", "unique_routes",
-#                 "is_overused", "is_underused")
-#         .rename({
-#             "firstnme": "First", "lastname": "Last",
-#             "division": "Division", "department": "Department",
-#             "total_flights": "Flights", "total_hours": "Hours",
-#             "unique_routes": "Routes",
-#             "is_overused": "Overused (P90+)", "is_underused": "Underused (P10-)",
-#         })
-#         .to_pandas()
-#     )
-#     st.dataframe(full_table, width="stretch")
-#     st.download_button(
-#         "Download staff utilisation CSV",
-#         data=full_table.to_csv(index=False),
-#         file_name="staff_utilisation.csv",
-#         mime="text/csv",
-#     )
-
-#     st.caption(
-#         "Data source: ATTGRP1.FLIGHT_CREW joined with ATTGRP1.STAFF and ATTGRP1.ROUTES. "
-#         "Crew gaps derived from ATTGRP1.FLIGHTS × ATTGRP1.AIRPLANES.CREW_MEMBERS."
-#     )
-
+*Data source: Staff records aggregated via SQL JOINs with aircraft and flight usage data, enriched with department and assignment metrics.*
+            """
+        )
 
 # ══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — Revenue Analysis
