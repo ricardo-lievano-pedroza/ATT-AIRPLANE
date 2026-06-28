@@ -544,7 +544,7 @@ with tab1:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — Revenue Analysis (unchanged)
+# TAB 3 — Revenue Analysis 
 # ══════════════════════════════════════════════════════════════════════════════
 with tab3:
     def format_revenue(value: float | int | None) -> str:
