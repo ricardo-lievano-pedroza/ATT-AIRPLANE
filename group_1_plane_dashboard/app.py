@@ -87,6 +87,11 @@ def get_staff_data() -> tuple[pl.DataFrame, pl.DataFrame]:
     return load_staff_flights(), load_crew_gaps()
 
 
+@st.cache_data
+def get_revenue_data() -> pl.DataFrame:
+    return load_revenue_data()
+
+
 @st.cache_data(show_spinner="Loading capacity data...", ttl=3600)
 def get_capacity_data() -> pl.DataFrame:
     """Load capacity data from parquet file"""
@@ -272,7 +277,7 @@ with tab1:
         "avg_tax_pct": "Tax % of Ticket", "avg_ticket_value": "Avg Ticket Value ($)",
     }
     table_df = filtered.select(list(display_cols.keys())).rename(display_cols).to_pandas()
-    st.dataframe(table_df, width="stretch")
+    # st.dataframe(table_df, width="stretch")
     st.download_button(
         "Download as CSV", data=table_df.to_csv(index=False),
         file_name="airport_tax_summary.csv", mime="text/csv",
@@ -551,7 +556,7 @@ with tab1:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — Revenue Analysis (unchanged)
+# TAB 3 — Revenue Analysis
 # ══════════════════════════════════════════════════════════════════════════════
 with tab3:
     def format_revenue(value: float | int | None) -> str:
@@ -773,6 +778,7 @@ with tab3:
                     country_max = country_df.filter(pl.col('total_revenue') == pl.col('total_revenue').max()).select('country')[0 , 0]
                     st.caption(f"Country attracting the highest revenue: {country_max.title()}")
 
+    build_revenue_tab()
     st.caption(
         "Data source: ATTGRP1.TICKETS aggregated via SQL JOIN with ROUTES, "
         "enriched with ATTGRP1.AIRPORTS geographic data."
