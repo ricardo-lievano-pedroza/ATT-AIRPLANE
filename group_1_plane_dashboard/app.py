@@ -418,7 +418,7 @@ with tab2:
             labels={"period": "Month", "avg_hours_per_staff": "Avg Hours / Staff"}
         )
         time_fig.update_layout(xaxis_tickangle=-45)
-        st.plotly_chart(time_fig, width="stretch")
+      
 
         st.divider()
 
