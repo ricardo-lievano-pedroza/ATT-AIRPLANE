@@ -267,7 +267,7 @@ with tab1:
         },
     )
     country_fig.update_layout(yaxis={"categoryorder": "total ascending"}, legend_title_text="Continent")
-    st.plotly_chart(country_fig, width="stretch")
+    
 
     st.divider()
 
