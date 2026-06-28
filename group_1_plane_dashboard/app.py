@@ -7,12 +7,15 @@ from pathlib import Path
 
 from analysis.ticket_revenue import load_data, filter_data
 from analysis.staff import (
-    load_staff_flights,
-    load_crew_gaps,
-    staff_utilisation,
-    occupation_by_route,
-    understaffing_by_route,
-    temporal_understaffing,
+    load_staff_counts,
+    load_staff_assignments,
+    load_staff_usage,
+    staff_global_kpis,
+    aircraft_staff_requirements,
+    route_staff_needs,
+    department_stats,
+    flying_hours_over_time,
+    staff_utilisation
 )
 
 from analysis.revenue_analysis import (
@@ -79,12 +82,16 @@ def get_ticket_data() -> pl.DataFrame:
 
 
 @st.cache_data
-def get_staff_data() -> tuple[pl.DataFrame, pl.DataFrame]:
-    needed = [DATA_DIR / "staff_flights.parquet", DATA_DIR / "crew_gaps.parquet"]
+def get_staff_data() -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+    needed = [
+        DATA_DIR / "q1_staff_counts.parquet", 
+        DATA_DIR / "q2_staff_assignments.parquet", 
+        DATA_DIR / "q3_staff_usage.parquet"
+    ]
     if not all(p.exists() for p in needed):
-        with st.spinner("Loading staff data from database (first run only)..."):
-            db_staff.fetch_and_save()
-    return load_staff_flights(), load_crew_gaps()
+        st.error("Missing staff data Parquet files. Please run the extraction script manually (e.g. `python -m db.staff`) before using the dashboard.")
+        st.stop()
+    return load_staff_counts(), load_staff_assignments(), load_staff_usage()
 
 
 @st.cache_data
