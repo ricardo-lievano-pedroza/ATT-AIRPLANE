@@ -188,7 +188,7 @@ with tab1:
         projection="natural earth",
     )
     map_fig.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0})
-    st.plotly_chart(map_fig, width="stretch")
+    st.plotly_chart(map_fig, use_container_width=True)
 
     st.divider()
 
@@ -218,7 +218,7 @@ with tab1:
             },
         )
         bar_fig.update_layout(yaxis={"categoryorder": "total ascending"}, legend_title_text="Continent")
-        st.plotly_chart(bar_fig, width="stretch")
+        st.plotly_chart(bar_fig, use_container_width=True)
 
     with col_right:
         st.subheader("Tax Burden vs Ticket Price")
@@ -234,7 +234,7 @@ with tab1:
                 "ticket_count": "Tickets Sold", "origin_continent": "Continent",
             },
         )
-        st.plotly_chart(scatter_fig, width="stretch")
+        st.plotly_chart(scatter_fig, use_container_width=True)
 
     st.divider()
 
@@ -267,7 +267,7 @@ with tab1:
         },
     )
     country_fig.update_layout(yaxis={"categoryorder": "total ascending"}, legend_title_text="Continent")
-    
+    st.plotly_chart(country_fig, use_container_width=True)
 
     st.divider()
 
@@ -280,7 +280,8 @@ with tab1:
         "avg_tax_pct": "Tax % of Ticket", "avg_ticket_value": "Avg Ticket Value ($)",
     }
     table_df = filtered.select(list(display_cols.keys())).rename(display_cols).to_pandas()
-    # st.dataframe(table_df, width="stretch")
+    st.dataframe(table_df, use_container_width=True)
+
     st.download_button(
         "Download as CSV", data=table_df.to_csv(index=False),
         file_name="airport_tax_summary.csv", mime="text/csv",
@@ -375,7 +376,7 @@ with tab2:
                 "variable": "Crew Type"
             }
         )
-        st.plotly_chart(air_fig, width="stretch")
+        st.plotly_chart(air_fig, use_container_width=True)
 
         st.divider()
 
@@ -393,7 +394,7 @@ with tab2:
                 labels={"staff_count": "Total Staff", "department": ""}
             )
             d1_fig.update_layout(yaxis={"categoryorder": "total ascending"})
-            st.plotly_chart(d1_fig, width="stretch", key="dept_staff")
+            st.plotly_chart(d1_fig, use_container_width=True)
 
         with col_d2:
             d2_fig = px.bar(
@@ -403,7 +404,7 @@ with tab2:
                 labels={"total_hours_required": "Total Hours", "department": ""}
             )
             d2_fig.update_layout(yaxis={"categoryorder": "total ascending"})
-            st.plotly_chart(d2_fig, width="stretch", key="dept_hours")
+            st.plotly_chart(d2_fig, use_container_width=True)
 
         st.divider()
 
@@ -418,7 +419,7 @@ with tab2:
             labels={"period": "Month", "avg_hours_per_staff": "Avg Hours / Staff"}
         )
         time_fig.update_layout(xaxis_tickangle=-45)
-      
+        st.plotly_chart(time_fig, use_container_width=True)
 
         st.divider()
 
@@ -436,14 +437,15 @@ with tab2:
                 overworked = util_df.filter(pl.col("is_overused")).select(
                     ["firstnme", "lastname", "department", "total_hours"]
                 )
-                st.dataframe(overworked.to_pandas(), width="stretch")
+                st.dataframe(overworked, use_container_width=True)
 
             with col_underw:
                 st.markdown("**Underused (Needs More Hours)**")
                 underworked = util_df.filter(pl.col("is_underused")).select(
                     ["firstnme", "lastname", "department", "total_hours"]
                 )
-                st.dataframe(underworked.to_pandas(), width="stretch")
+                st.dataframe(underworked, use_container_width=True)
+
         else:
             st.info("No staff utilization data for selected filters.")
 
