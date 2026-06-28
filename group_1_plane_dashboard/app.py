@@ -265,7 +265,7 @@ with tab1:
         "avg_tax_pct": "Tax % of Ticket", "avg_ticket_value": "Avg Ticket Value ($)",
     }
     table_df = filtered.select(list(display_cols.keys())).rename(display_cols).to_pandas()
-    st.dataframe(table_df, width="stretch")
+    # st.dataframe(table_df, width="stretch")
     st.download_button(
         "Download as CSV", data=table_df.to_csv(index=False),
         file_name="airport_tax_summary.csv", mime="text/csv",
@@ -544,7 +544,7 @@ with tab1:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — Revenue Analysis (unchanged)
+# TAB 3 — Revenue Analysis 
 # ══════════════════════════════════════════════════════════════════════════════
 with tab3:
     def format_revenue(value: float | int | None) -> str:
