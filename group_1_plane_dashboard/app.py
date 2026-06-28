@@ -87,19 +87,27 @@ def get_staff_data() -> tuple[pl.DataFrame, pl.DataFrame]:
     return load_staff_flights(), load_crew_gaps()
 
 
-@st.cache_data(show_spinner="Loading revenue data...")
+@st.cache_data
 def get_revenue_data() -> pl.DataFrame:
-    df = pl.DataFrame()
+    return load_revenue_data()
+
+
+@st.cache_data(show_spinner="Loading capacity data...", ttl=3600)
+def get_capacity_data() -> pl.DataFrame:
     try:
-        df = load_revenue_data()
-    except Exception:
-        pass
-    return df
+        capacity_file = DATA_DIR / "capacity.parquet"
+        if not capacity_file.exists():
+            st.error(f"Capacity file not found at {capacity_file}")
+            return pl.DataFrame()
+        return pl.read_parquet(capacity_file)
+    except Exception as e:
+        st.error(f"Error loading capacity data: {str(e)}")
+        return pl.DataFrame()
 
 
 # ── Tabs ──────────────────────────────────────────────────────────────────────
 
-tab1, tab2, tab3 = st.tabs(["Revenue & Tax", "Staff Occupation", "Revenue Anlaysis"])
+tab1, tab2, tab3, tab4 = st.tabs(["Revenue & Tax", "Staff Occupation", "Revenue Anlaysis", "Plane Capacity"])
 
 
 def multiselect_with_all(container, label: str, options: list[str]) -> list[str]:
@@ -544,7 +552,7 @@ with tab1:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — Revenue Analysis 
+# TAB 3 — Revenue Analysis
 # ══════════════════════════════════════════════════════════════════════════════
 with tab3:
     def format_revenue(value: float | int | None) -> str:
@@ -770,8 +778,8 @@ with tab3:
     st.subheader("Key Findings")
     st.markdown(
         """
-- **Revenue seasonality.** The revenue trend shows that during the second and 
-    fourth quarter revenue increaseas, showing evidennce of higer demand during 
+- **Revenue seasonality.** The revenue trend shows that during the second and
+    fourth quarter revenue increaseas, showing evidennce of higer demand during
     that time.
 - **Economy class is the higest revenue driver**
   Most tickets that are sold are for Economy passengers reaching over the 70%
@@ -784,3 +792,249 @@ with tab3:
         "Data source: ATTGRP1.TICKETS aggregated via SQL JOIN with ROUTES, "
         "enriched with ATTGRP1.AIRPORTS geographic data."
     )
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 4 — Plane Capacity Analysis (NEW)
+# ══════════════════════════════════════════════════════════════════════════════
+
+with tab4:
+    df_capacity = get_capacity_data()
+    
+    if df_capacity.is_empty():
+        st.warning("No capacity data available. Please ensure capacity.parquet is in the data directory.")
+    else:
+        st.title("Plane Capacity Analysis")
+        st.markdown(
+            "Track aircraft **seat occupancy and utilization** across routes, flights, and time. "
+            "Monitor capacity percentage to optimize scheduling and revenue management."
+        )
+        
+        # Calculate occupancy percentage and add temporal columns for analysis
+        try:
+            df_capacity = df_capacity.with_columns([
+                (pl.col("tickets_sold") / pl.col("total_capacity")).alias("capacity_pct"),
+                pl.col("route_code").alias("route_id"),
+            ])
+            
+            # Add temporal columns - handle datetime directly
+            df_capacity = df_capacity.with_columns([
+                pl.col("departure").dt.week().alias("week"),
+                pl.col("departure").dt.month().alias("month"),
+                pl.col("departure").dt.weekday().alias("day_of_week"),
+                pl.col("departure").dt.strftime("%Y-%m").alias("year_month"),
+            ])
+        except Exception as e:
+            st.error(f"Error processing capacity data: {str(e)}")
+            st.write(f"Columns available: {df_capacity.columns}")
+            st.write(f"Data types: {df_capacity.schema}")
+            st.stop()
+        
+        # Key metrics
+        metric_cols = st.columns(4)
+        avg_capacity = df_capacity["capacity_pct"].mean()
+        max_capacity = df_capacity["capacity_pct"].max()
+        flights_count = df_capacity.select("flight_id").n_unique()
+        routes_count = df_capacity.select("route_id").n_unique()
+        
+        metric_cols[0].metric("Avg Occupancy Rate", f"{avg_capacity:.1%}")
+        metric_cols[1].metric("Peak Occupancy", f"{max_capacity:.1%}")
+        metric_cols[2].metric("Flights Tracked", int(flights_count))
+        metric_cols[3].metric("Routes Covered", int(routes_count))
+        
+        st.divider()
+        
+        # ─────────────────────────────────────────────────────────────
+        # VISUALIZATION 1: Temporal Analysis (Week, Month, Day of Week)
+        # ─────────────────────────────────────────────────────────────
+        st.subheader("📅 Capacity Over Time")
+        
+        temporal_tab1, temporal_tab2, temporal_tab3 = st.tabs(
+            ["By Week", "By Month", "By Day of Week"]
+        )
+        
+        # By Week
+        with temporal_tab1:
+            weekly_data = (
+                df_capacity.group_by("week")
+                .agg([
+                    pl.col("capacity_pct").mean().alias("avg_capacity"),
+                    pl.col("flight_id").n_unique().alias("flights"),
+                ])
+                .sort("week")
+                .to_pandas()
+            )
+            
+            weekly_fig = px.line(
+                weekly_data,
+                x="week",
+                y="avg_capacity",
+                markers=True,
+                title="Average Capacity by Week",
+                labels={"week": "Week Number", "avg_capacity": "Avg Occupancy %"},
+                hover_data={"flights": True},
+            )
+            weekly_fig.update_yaxes(tickformat=".0%")
+            weekly_fig.update_layout(hovermode="x unified", margin=dict(l=0, r=0, t=50, b=0))
+            st.plotly_chart(weekly_fig, use_container_width=True)
+        
+        # By Month
+        with temporal_tab2:
+            monthly_data = (
+                df_capacity.group_by("year_month")
+                .agg([
+                    pl.col("capacity_pct").mean().alias("avg_capacity"),
+                    pl.col("flight_id").n_unique().alias("flights"),
+                ])
+                .sort("year_month")
+                .to_pandas()
+            )
+            
+            monthly_fig = px.bar(
+                monthly_data,
+                x="year_month",
+                y="avg_capacity",
+                title="Average Capacity by Month",
+                labels={"year_month": "Month", "avg_capacity": "Avg Occupancy %"},
+                hover_data={"flights": True},
+                color="avg_capacity",
+                color_continuous_scale="RdYlGn",
+            )
+            monthly_fig.update_yaxes(tickformat=".0%")
+            monthly_fig.update_layout(margin=dict(l=0, r=0, t=50, b=0))
+            st.plotly_chart(monthly_fig, use_container_width=True)
+        
+        # By Day of Week
+        with temporal_tab3:
+            day_names = {0: "Monday", 1: "Tuesday", 2: "Wednesday", 3: "Thursday", 
+                        4: "Friday", 5: "Saturday", 6: "Sunday"}
+            
+            dow_data = (
+                df_capacity.group_by("day_of_week")
+                .agg([
+                    pl.col("capacity_pct").mean().alias("avg_capacity"),
+                    pl.col("flight_id").n_unique().alias("flights"),
+                ])
+                .sort("day_of_week")
+                .with_columns(
+                    pl.col("day_of_week").map_elements(lambda x: day_names.get(x, str(x))).alias("day_name")
+                )
+                .to_pandas()
+            )
+            
+            dow_fig = px.bar(
+                dow_data,
+                x="day_name",
+                y="avg_capacity",
+                title="Average Capacity by Day of Week",
+                labels={"day_name": "Day", "avg_capacity": "Avg Occupancy %"},
+                hover_data={"flights": True},
+                color="avg_capacity",
+                color_continuous_scale="Blues",
+            )
+            dow_fig.update_yaxes(tickformat=".0%")
+            dow_fig.update_layout(margin=dict(l=0, r=0, t=50, b=0))
+            st.plotly_chart(dow_fig, use_container_width=True)
+        
+        st.divider()
+        
+        # ─────────────────────────────────────────────────────────────
+        # VISUALIZATION 2: Capacity by Flight ID
+        # ─────────────────────────────────────────────────────────────
+        st.subheader("✈️ Capacity by Flight")
+        
+        flight_data = (
+            df_capacity.group_by("flight_id")
+            .agg([
+                pl.col("capacity_pct").mean().alias("avg_capacity"),
+                pl.col("capacity_pct").max().alias("max_capacity"),
+                pl.col("capacity_pct").min().alias("min_capacity"),
+                pl.col("route_id").first().alias("route_id"),
+                pl.col("departure").count().alias("observations"),
+            ])
+            .sort("avg_capacity", descending=True)
+            .to_pandas()
+        )
+        
+        # Create two columns: scatter and table
+        flight_col1, flight_col2 = st.columns([2, 1])
+        
+        with flight_col1:
+            flight_fig = px.scatter(
+                flight_data,
+                x="flight_id",
+                y="avg_capacity",
+                size="observations",
+                color="avg_capacity",
+                hover_data={"route_id": True, "max_capacity": ":.1%", "min_capacity": ":.1%"},
+                color_continuous_scale="Viridis",
+                title="Average Capacity by Flight ID",
+                labels={"flight_id": "Flight ID", "avg_capacity": "Avg Occupancy %"},
+            )
+            flight_fig.update_yaxes(tickformat=".0%")
+            flight_fig.update_layout(margin=dict(l=0, r=0, t=50, b=0), height=500)
+            st.plotly_chart(flight_fig, use_container_width=True)
+        
+        with flight_col2:
+            st.caption("Top 10 Flights by Capacity")
+            top_flights = flight_data.nlargest(10, "avg_capacity")[["flight_id", "avg_capacity", "route_id"]]
+            top_flights["avg_capacity"] = top_flights["avg_capacity"].apply(lambda x: f"{x:.1%}")
+            st.dataframe(top_flights, use_container_width=True, hide_index=True)
+        
+        st.divider()
+        
+        # ─────────────────────────────────────────────────────────────
+        # VISUALIZATION 3: Capacity by Route ID
+        # ─────────────────────────────────────────────────────────────
+        st.subheader("🛫 Capacity by Route")
+        
+        route_data = (
+            df_capacity.group_by("route_id")
+            .agg([
+                pl.col("capacity_pct").mean().alias("avg_capacity"),
+                pl.col("capacity_pct").max().alias("max_capacity"),
+                pl.col("flight_id").n_unique().alias("num_flights"),
+                pl.col("departure").count().alias("observations"),
+            ])
+            .sort("avg_capacity", descending=True)
+            .to_pandas()
+        )
+        
+        # Horizontal bar chart
+        route_fig = px.bar(
+            route_data.head(20),
+            y="route_id",
+            x="avg_capacity",
+            orientation="h",
+            color="avg_capacity",
+            color_continuous_scale="RdYlGn",
+            hover_data={"num_flights": True, "max_capacity": ":.1%"},
+            title="Top 20 Routes by Average Capacity",
+            labels={"route_id": "Route ID", "avg_capacity": "Avg Occupancy %"},
+        )
+        route_fig.update_xaxes(tickformat=".0%")
+        route_fig.update_layout(yaxis={"categoryorder": "total ascending"}, margin=dict(l=0, r=0, t=50, b=0))
+        st.plotly_chart(route_fig, use_container_width=True)
+        
+        st.divider()
+        
+        # Capacity summary statistics
+        st.subheader("Summary Statistics")
+        summary_cols = st.columns(3)
+        
+        with summary_cols[0]:
+            st.metric(
+                "Flights with >90% Occupancy",
+                len(flight_data[flight_data["avg_capacity"] > 0.9])
+            )
+        
+        with summary_cols[1]:
+            st.metric(
+                "Flights with <50% Occupancy",
+                len(flight_data[flight_data["avg_capacity"] < 0.5])
+            )
+        
+        with summary_cols[2]:
+            st.metric(
+                "Routes Analyzed",
+                len(route_data)
+            )
