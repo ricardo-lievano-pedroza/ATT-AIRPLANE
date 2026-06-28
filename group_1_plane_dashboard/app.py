@@ -355,8 +355,8 @@ with tab2:
         # ── KPIs ─────────────────────────────────────────────────────────
         k1, k2, k3 = st.columns(3)
         k1.metric("Total Staff", f"{kpis['total_staff']:,}")
-        k2.metric("Avg Distance / Staff / Year", f"{kpis['avg_km_per_staff']:,.1f} km")
-        k3.metric("Avg Hours / Staff / Year", f"{kpis['avg_hours_per_staff']:,.1f} h")
+        k2.metric("Avg Distance / Staff", f"{kpis['avg_km_per_staff']:,.1f} km")
+        k3.metric("Avg Hours / Staff", f"{kpis['avg_hours_per_staff']:,.1f} h")
 
         st.divider()
 
