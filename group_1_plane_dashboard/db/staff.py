@@ -17,91 +17,112 @@ DB_URL = "db2+ibm_db://attgrp1:bigdata@52.211.123.34:25010/ATTPLANE"
 SCHEMA = "ATTGRP1"
 DATA_DIR = Path(__file__).parent.parent / "data"
 
-# Each row = one staff member assigned to one flight leg.
-# FLIGHT_CREW already carries ROUTE_CODE and DEPARTURE, so FLIGHTS is not needed.
-STAFF_FLIGHTS_SQL = f"""
-SELECT
-    fc.EMPNO,
-    s.FIRSTNME,
-    s.LASTNAME,
-    s.DIVISION,
-    s.DEPARTMENT,
-    fc.ROUTE_CODE,
-    fc.DEPARTURE,
-    r.ORIGIN,
-    r.DESTINATION,
-    r.DISTANCE,
-    r.FLIGHT_MINUTES
-FROM {SCHEMA}.FLIGHT_CREW  fc
-JOIN {SCHEMA}.STAFF         s  ON fc.EMPNO      = s.EMPNO
-JOIN {SCHEMA}.ROUTES        r  ON fc.ROUTE_CODE = r.ROUTE_CODE
+# Query 1: Number of staff by department
+Q1_STAFF_COUNTS_SQL = f"""
+SELECT 
+	DEPARTMENT,
+	COUNT(DISTINCT EMPNO) AS STAFF_COUNT
+FROM {SCHEMA}.STAFF
+GROUP BY 
+	DEPARTMENT
 """
 
-# Aggregate per route per month: total required crew vs. actual crew assigned.
-# The inner subquery aggregates at the flight level first (one row per flight) so that
-# CREW_MEMBERS is counted once per flight — not once per crew row as it would be in a
-# flat LEFT JOIN. The outer query then sums across flights within each route-month.
-CREW_GAPS_SQL = f"""
-SELECT
-    fs.ROUTE_CODE,
-    r.ORIGIN,
-    r.DESTINATION,
-    YEAR(fs.DEPARTURE)                        AS year,
-    MONTH(fs.DEPARTURE)                       AS month,
-    COUNT(*)                                  AS total_flights,
-    SUM(fs.required_crew)                     AS total_required_crew,
-    SUM(fs.actual_crew)                       AS total_actual_crew,
-    SUM(fs.required_crew - fs.actual_crew)    AS total_crew_gap
-FROM (
-    SELECT
-        f.FLIGHT_ID,
-        f.ROUTE_CODE,
-        f.DEPARTURE,
-        a.CREW_MEMBERS      AS required_crew,
-        COUNT(fc.EMPNO)     AS actual_crew
-    FROM {SCHEMA}.FLIGHTS          f
-    JOIN {SCHEMA}.AIRPLANES        a  ON f.AIRPLANE    = a.AIRCRAFT_REGISTRATION
-    LEFT JOIN {SCHEMA}.FLIGHT_CREW fc ON f.FLIGHT_ID   = fc.FLIGHT_ID
-                                     AND f.ROUTE_CODE  = fc.ROUTE_CODE
-                                     AND f.DEPARTURE   = fc.DEPARTURE
-    GROUP BY f.FLIGHT_ID, f.ROUTE_CODE, f.DEPARTURE, a.CREW_MEMBERS
-) fs
-JOIN {SCHEMA}.ROUTES r ON fs.ROUTE_CODE = r.ROUTE_CODE
-GROUP BY fs.ROUTE_CODE, r.ORIGIN, r.DESTINATION,
-         YEAR(fs.DEPARTURE), MONTH(fs.DEPARTURE)
-HAVING SUM(fs.required_crew - fs.actual_crew) > 0
+# Query 2: Staff assignments for distance and time
+Q2_STAFF_ASSIGNMENTS_SQL = f"""
+SELECT 
+	s.FIRSTNME,
+	s.LASTNAME,
+	fc.EMPNO,
+	fc.FLIGHT_ID,
+	fc.ROUTE_CODE,
+	fc.DEPARTURE,
+	s.DEPARTMENT,
+	sum(r.distance) as distance,
+	sum(r.flight_minutes) as flight_minutes  
+FROM {SCHEMA}.FLIGHT_CREW AS fc
+LEFT JOIN {SCHEMA}.ROUTES AS r ON fc.ROUTE_CODE = r.ROUTE_CODE
+LEFT JOIN {SCHEMA}.STAFF AS s ON fc.EMPNO = s.EMPNO
+GROUP BY 
+	s.FIRSTNME,
+	s.LASTNAME,
+	s.DEPARTMENT,
+	fc.EMPNO,
+	fc.FLIGHT_ID,
+	fc.ROUTE_CODE,
+	fc.DEPARTURE
 """
 
+# Query 3: Staff usage vs Required by Aircraft and Route
+Q3_STAFF_USAGE_SQL = f"""
+WITH fc as (
+SELECT 	
+	fc.FLIGHT_ID,
+	fc.ROUTE_CODE,
+	fc.DEPARTURE,
+	COUNT(DISTINCT fc.EMPNO) as USED_CREW
+FROM {SCHEMA}.FLIGHT_CREW AS fc
+GROUP BY 
+	FLIGHT_ID,
+	ROUTE_CODE,
+	DEPARTURE
+)
+
+SELECT 
+	f.FLIGHT_ID,
+	f.ROUTE_CODE,
+	r.ORIGIN,
+	r.DESTINATION,
+	f.DEPARTURE,
+	f.AIRPLANE,
+	a.CREW_MEMBERS AS REQUIRED_CREW,
+	a.MODEL AS AIRPLANE_MODEL,
+	a.AIRCRAFT_REGISTRATION AS AIRPLANE_REG,
+	fc.USED_CREW
+FROM {SCHEMA}.FLIGHTS AS f 
+LEFT JOIN {SCHEMA}.AIRPLANES AS a ON f.AIRPLANE = a.AIRCRAFT_REGISTRATION
+LEFT JOIN fc ON 
+	fc.FLIGHT_ID = f.FLIGHT_ID AND
+	fc.ROUTE_CODE = f.ROUTE_CODE AND
+	fc.DEPARTURE = f.DEPARTURE
+LEFT JOIN {SCHEMA}.ROUTES AS r ON f.ROUTE_CODE = r.ROUTE_CODE
+"""
 
 def fetch_and_save():
     DATA_DIR.mkdir(exist_ok=True)
     engine = create_engine(DB_URL)
 
-    print("Fetching staff flight assignments...")
+    print("Fetching Q1: Staff counts...")
     with engine.connect() as conn:
-        df_staff = _read_sql(STAFF_FLIGHTS_SQL, conn)
-    df_staff.write_parquet(DATA_DIR / "staff_flights.parquet")
-    print(f"  {len(df_staff):,} assignment rows → data/staff_flights.parquet")
+        df_q1 = _read_sql(Q1_STAFF_COUNTS_SQL, conn)
+    df_q1.write_parquet(DATA_DIR / "q1_staff_counts.parquet")
+    print(f"  {len(df_q1):,} rows → data/q1_staff_counts.parquet")
 
-    print("Fetching crew gap data by route and month...")
+    print("Fetching Q2: Staff assignments...")
     with engine.connect() as conn:
-        df_gaps = _read_sql(CREW_GAPS_SQL, conn)
-    df_gaps.write_parquet(DATA_DIR / "crew_gaps.parquet")
-    print(f"  {len(df_gaps):,} route-month rows → data/crew_gaps.parquet")
+        df_q2 = _read_sql(Q2_STAFF_ASSIGNMENTS_SQL, conn)
+    df_q2.write_parquet(DATA_DIR / "q2_staff_assignments.parquet")
+    print(f"  {len(df_q2):,} rows → data/q2_staff_assignments.parquet")
+
+    print("Fetching Q3: Staff usage...")
+    with engine.connect() as conn:
+        df_q3 = _read_sql(Q3_STAFF_USAGE_SQL, conn)
+    df_q3.write_parquet(DATA_DIR / "q3_staff_usage.parquet")
+    print(f"  {len(df_q3):,} rows → data/q3_staff_usage.parquet")
 
     print("Done.")
-
 
 def _read_sql(sql: str, conn) -> pl.DataFrame:
     """Execute SQL and return a Polars DataFrame, normalising column names."""
     try:
         df = pl.read_database(sql, conn)
-        return df.rename({c: c.lower().strip() for c in df.columns})
-    except Exception:
+        df.columns = [c.lower().strip() for c in df.columns]
+        return df
+    except Exception as exc:
+        print(f"Error executing query:\n{sql}\n\n{exc}")
+        # Return an empty DataFrame or re-raise
         raw = pd.read_sql(sql, conn)
         raw.columns = [c.lower().strip() for c in raw.columns]
         return pl.from_pandas(raw)
-
 
 def test_connection(n: int = 100) -> None:
     """Fetch the first `n` rows of each query, print shape + preview, and exit."""
@@ -109,8 +130,9 @@ def test_connection(n: int = 100) -> None:
     engine = create_engine(DB_URL)
 
     queries = {
-        "STAFF_FLIGHTS (first {n} rows)": f"SELECT * FROM ({STAFF_FLIGHTS_SQL}) AS t FETCH FIRST {n} ROWS ONLY",
-        "CREW_GAPS (first {n} rows)":     f"SELECT * FROM ({CREW_GAPS_SQL}) AS t FETCH FIRST {n} ROWS ONLY",
+        "Q1_STAFF_COUNTS (first {n} rows)": f"SELECT * FROM ({Q1_STAFF_COUNTS_SQL}) AS t FETCH FIRST {n} ROWS ONLY",
+        "Q2_STAFF_ASSIGNMENTS (first {n} rows)": f"SELECT * FROM ({Q2_STAFF_ASSIGNMENTS_SQL}) AS t FETCH FIRST {n} ROWS ONLY",
+        "Q3_STAFF_USAGE (first {n} rows)": f"SELECT * FROM ({Q3_STAFF_USAGE_SQL}) AS t FETCH FIRST {n} ROWS ONLY",
     }
 
     with engine.connect() as conn:

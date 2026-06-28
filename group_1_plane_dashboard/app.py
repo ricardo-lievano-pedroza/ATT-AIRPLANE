@@ -15,7 +15,7 @@ from analysis.staff import (
     temporal_understaffing,
 )
 
-from revenue_analysis import (
+from analysis.revenue_analysis import (
     load_revenue_data,
     most_profitable_outgoing_route,
     most_revenue_perceived,
