@@ -10,7 +10,7 @@ A Streamlit dashboard that analyses the behaviour and performance of the IE Airp
 - Dalton Pearce Kern
 
 ---
-
+link : https://att-airplane-l38wg2fqfub5yvprp5tfqx.streamlit.app/
 ## 1. Project Objective
 
 The goal of this project is to **analyse the behaviour and performance of the IE Airplanes fleet** by combining information across the airline's core operational entities:
