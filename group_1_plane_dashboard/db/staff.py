@@ -100,8 +100,31 @@ def fetch_and_save():
     print("Fetching Q2: Staff assignments...")
     with engine.connect() as conn:
         df_q2 = _read_sql(Q2_STAFF_ASSIGNMENTS_SQL, conn)
-    df_q2.write_parquet(DATA_DIR / "q2_staff_assignments.parquet")
-    print(f"  {len(df_q2):,} rows → data/q2_staff_assignments.parquet")
+
+    # Q2 is one row per (employee, flight) — far too big to keep at that
+    # grain in the app's memory. Collapse it here into the two small tables
+    # the dashboard actually consumes: an employee dimension and a
+    # per-employee-per-month fact table.
+    df_q2 = df_q2.with_columns(pl.col("departure").cast(pl.Datetime))
+
+    employee_dim = df_q2.select(["empno", "firstnme", "lastname", "department"]).unique(subset=["empno"])
+    employee_dim.write_parquet(DATA_DIR / "staff_employee_dim.parquet")
+    print(f"  {len(employee_dim):,} rows → data/staff_employee_dim.parquet")
+
+    monthly_agg = (
+        df_q2.with_columns(
+            pl.col("departure").dt.year().alias("year"),
+            pl.col("departure").dt.month().alias("month"),
+        )
+        .group_by(["empno", "year", "month"])
+        .agg(
+            pl.col("distance").sum().alias("total_distance"),
+            pl.col("flight_minutes").sum().alias("total_minutes"),
+            pl.len().alias("total_flights"),
+        )
+    )
+    monthly_agg.write_parquet(DATA_DIR / "staff_monthly_agg.parquet")
+    print(f"  {len(monthly_agg):,} rows → data/staff_monthly_agg.parquet")
 
     print("Fetching Q3: Staff usage...")
     with engine.connect() as conn:

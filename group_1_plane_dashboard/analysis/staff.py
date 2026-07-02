@@ -6,19 +6,11 @@ DATA_DIR = Path(__file__).parent.parent / "data"
 def load_staff_counts() -> pl.DataFrame:
     return pl.scan_parquet(DATA_DIR / "q1_staff_counts.parquet").collect()
 
-def load_staff_assignments() -> pl.DataFrame:
-    q2 = pl.scan_parquet(DATA_DIR / "q2_staff_assignments.parquet")
-    
-    return (
-        q2.with_columns(
-            pl.col("departure").cast(pl.Datetime)
-        )
-        .with_columns(
-            pl.col("departure").dt.year().alias("year"),
-            pl.col("departure").dt.month().alias("month")
-        )
-        .collect()
-    )
+def load_staff_employee_dim() -> pl.DataFrame:
+    return pl.scan_parquet(DATA_DIR / "staff_employee_dim.parquet").collect()
+
+def load_staff_monthly_agg() -> pl.DataFrame:
+    return pl.scan_parquet(DATA_DIR / "staff_monthly_agg.parquet").collect()
 
 def load_staff_usage() -> pl.DataFrame:
     q3 = pl.scan_parquet(DATA_DIR / "q3_staff_usage.parquet")
@@ -31,32 +23,33 @@ def load_staff_usage() -> pl.DataFrame:
     )
 
 # --- KPIs ---
-def staff_global_kpis(counts_df: pl.DataFrame, assign_df: pl.DataFrame) -> dict:
+def staff_global_kpis(counts_df: pl.DataFrame, monthly_df: pl.DataFrame) -> dict:
     total_staff = counts_df["staff_count"].sum()
-    
+
     # Distance and hours per employee
     emp_stats = (
-        assign_df.lazy()
+        monthly_df.lazy()
         .group_by("empno")
         .agg(
-            pl.col("distance").sum().alias("total_distance"),
-            pl.col("flight_minutes").sum().alias("total_minutes")
+            pl.col("total_distance").sum(),
+            pl.col("total_minutes").sum()
         )
         .collect()
     )
-    
-    max_dep = assign_df["departure"].max()
-    min_dep = assign_df["departure"].min()
-    
+
+    # monthly_df is already bucketed to year/month, so the span is derived
+    # from the number of distinct months rather than exact departure timestamps
     years = 1.0
-    if max_dep and min_dep:
-        years = (max_dep - min_dep).days / 365.5
+    if len(monthly_df) > 0:
+        ym = monthly_df.select((pl.col("year") * 12 + pl.col("month")).alias("ym"))
+        span_months = ym["ym"].max() - ym["ym"].min() + 1
+        years = span_months / 12.0
         if years <= 0:
             years = 1.0
-            
+
     avg_km = (emp_stats["total_distance"].mean() / years) if len(emp_stats) > 0 else 0
     avg_hours = (emp_stats["total_minutes"].mean() / 60.0 / years) if len(emp_stats) > 0 else 0
-    
+
     return {
         "total_staff": total_staff,
         "avg_km_per_staff": avg_km,
@@ -107,29 +100,30 @@ def route_staff_needs(usage_df: pl.DataFrame) -> pl.DataFrame:
     return res.sort("crew_gap", descending=True).collect()
 
 # --- Department Analysis ---
-def department_stats(counts_df: pl.DataFrame, assign_df: pl.DataFrame) -> pl.DataFrame:
+def department_stats(counts_df: pl.DataFrame, employee_dim_df: pl.DataFrame, monthly_df: pl.DataFrame) -> pl.DataFrame:
     # Hours by department
     dept_hours = (
-        assign_df.lazy()
+        monthly_df.lazy()
+        .group_by("empno")
+        .agg(pl.col("total_minutes").sum())
+        .join(employee_dim_df.lazy().select(["empno", "department"]), on="empno", how="left")
         .group_by("department")
-        .agg(
-            (pl.col("flight_minutes").sum() / 60.0).alias("total_hours_required")
-        )
+        .agg((pl.col("total_minutes").sum() / 60.0).alias("total_hours_required"))
         .collect()
     )
-    
+
     return (
         counts_df.join(dept_hours, on="department", how="left")
         .sort("staff_count", descending=True)
     )
 
 # --- Temporal Analysis ---
-def flying_hours_over_time(assign_df: pl.DataFrame) -> pl.DataFrame:
+def flying_hours_over_time(monthly_df: pl.DataFrame) -> pl.DataFrame:
     return (
-        assign_df.lazy()
+        monthly_df.lazy()
         .group_by("year", "month")
         .agg(
-            (pl.col("flight_minutes").sum() / 60.0).alias("total_hours"),
+            (pl.col("total_minutes").sum() / 60.0).alias("total_hours"),
             pl.col("empno").n_unique().alias("unique_staff")
         )
         .with_columns(
@@ -143,15 +137,16 @@ def flying_hours_over_time(assign_df: pl.DataFrame) -> pl.DataFrame:
     )
 
 # --- Vacations / Overwork ---
-def staff_utilisation(assign_df: pl.DataFrame) -> pl.DataFrame:
+def staff_utilisation(monthly_df: pl.DataFrame, employee_dim_df: pl.DataFrame) -> pl.DataFrame:
     base = (
-        assign_df.lazy()
-        .group_by("empno", "firstnme", "lastname", "department")
+        monthly_df.lazy()
+        .group_by("empno")
         .agg(
-            pl.len().alias("total_flights"),
-            (pl.col("flight_minutes").sum() / 60.0).alias("total_hours"),
-            pl.col("route_code").n_unique().alias("unique_routes")
+            pl.col("total_flights").sum(),
+            (pl.col("total_minutes").sum() / 60.0).alias("total_hours"),
         )
+        .join(employee_dim_df.lazy(), on="empno", how="left")
+        .select(["empno", "firstnme", "lastname", "department", "total_flights", "total_hours"])
         .sort("total_hours", descending=True)
         .collect()
     )

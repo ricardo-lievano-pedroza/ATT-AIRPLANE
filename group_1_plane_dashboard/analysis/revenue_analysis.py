@@ -31,7 +31,7 @@ def _date_range(start: str | date | datetime, end: str | date | datetime) -> tup
     return start_date, end_date
 
 
-def _filter_by_date_range(
+def filter_by_date_range(
     df: pl.DataFrame,
     start: str | date | datetime = DEFAULT_START,
     end: str | date | datetime = DEFAULT_END,
@@ -59,18 +59,18 @@ def _normalize_columns(df: pl.DataFrame) -> pl.DataFrame:
         month_expr = pl.col("month").cast(pl.Date, strict=False)
 
     return df.select(
-        pl.col("year").cast(pl.Int64).alias("year"),
+        pl.col("year").cast(pl.Int32).alias("year"),
         month_expr.alias("year_month"),
-        pl.col("continent").cast(pl.Utf8).alias("continent"),
-        pl.col("country").cast(pl.Utf8).alias("country"),
-        pl.col("city").cast(pl.Utf8).alias("city"),
-        pl.col("route").cast(pl.Utf8).alias("route"),
-        pl.col("origin").cast(pl.Utf8).alias("origin"),
-        pl.col("destination").cast(pl.Utf8).alias("destination"),
-        pl.col("destination_continent").cast(pl.Utf8).alias("destination_continent"),
-        pl.col("destination_conutry").cast(pl.Utf8).alias("destination_country"),
-        pl.col("destination_city").cast(pl.Utf8).alias("destination_city"),
-        pl.col("class").cast(pl.Utf8).alias("class"),
+        pl.col("continent").cast(pl.Categorical).alias("continent"),
+        pl.col("country").cast(pl.Categorical).alias("country"),
+        pl.col("city").cast(pl.Categorical).alias("city"),
+        pl.col("route").cast(pl.Categorical).alias("route"),
+        pl.col("origin").cast(pl.Categorical).alias("origin"),
+        pl.col("destination").cast(pl.Categorical).alias("destination"),
+        pl.col("destination_continent").cast(pl.Categorical).alias("destination_continent"),
+        pl.col("destination_conutry").cast(pl.Categorical).alias("destination_country"),
+        pl.col("destination_city").cast(pl.Categorical).alias("destination_city"),
+        pl.col("class").cast(pl.Categorical).alias("class"),
         pl.col("revenue").cast(pl.Float64).alias("revenue"),
     )
 
@@ -80,83 +80,53 @@ def load_revenue_data() -> pl.DataFrame:
     return _normalize_columns(revenue)
 
 
-def total_revenue_per_range(
-    df: pl.DataFrame,
-    start: str | date | datetime = DEFAULT_START,
-    end: str | date | datetime = DEFAULT_END,
-) -> float:
-    return (
-        _filter_by_date_range(df, start, end)
-        .select(pl.col("revenue").sum().fill_null(0).alias("total_revenue"))
-        .item()
-    )
+def compute_revenue_dashboard_metrics(df: pl.DataFrame) -> dict:
+    """Compute every aggregate the Revenue tab needs from a single shared lazy
+    query, so Polars scans the (potentially near-full) filtered table once
+    instead of once per metric."""
+    lf = df.lazy()
 
-
-def most_profitable_outgoing_route(
-    df: pl.DataFrame,
-    start: str | date | datetime = DEFAULT_START,
-    end: str | date | datetime = DEFAULT_END,
-) -> pl.DataFrame:
-    return (
-        _filter_by_date_range(df, start, end)
-        .group_by("route","city","country","destination_city","destination_country")
+    total_lazy = lf.select(pl.col("revenue").sum().fill_null(0).alias("total_revenue"))
+    route_lazy = (
+        lf.group_by("route", "city", "country", "destination_city", "destination_country")
         .agg(pl.col("revenue").sum().alias("total_revenue"))
         .sort("total_revenue", descending=True)
         .limit(1)
     )
-
-
-def most_revenue_perceived(
-    df: pl.DataFrame,
-    start: str | date | datetime = DEFAULT_START,
-    end: str | date | datetime = DEFAULT_END,
-) -> pl.DataFrame:
-    return (
-        _filter_by_date_range(df, start, end)
-        .group_by("continent", "country", "city")
+    city_lazy = (
+        lf.group_by("continent", "country", "city")
         .agg(pl.col("revenue").sum().alias("total_revenue"))
         .sort("total_revenue", descending=True)
         .limit(1)
     )
-
-
-def revenue_trend_analysis(
-    df: pl.DataFrame,
-    start: str | date | datetime = DEFAULT_START,
-    end: str | date | datetime = DEFAULT_END,
-) -> pl.DataFrame:
-    return (
-        _filter_by_date_range(df, start, end)
-        .group_by("year_month")
+    trend_lazy = (
+        lf.group_by("year_month")
         .agg(pl.col("revenue").sum().alias("total_revenue"))
         .sort("year_month")
     )
-
-
-def revenue_class_analysis(
-    df: pl.DataFrame,
-    start: str | date | datetime = DEFAULT_START,
-    end: str | date | datetime = DEFAULT_END,
-) -> pl.DataFrame:
-    return (
-        _filter_by_date_range(df, start, end)
-        .group_by("class")
+    class_lazy = (
+        lf.group_by("class")
+        .agg(pl.col("revenue").sum().alias("total_revenue"))
+        .sort("total_revenue", descending=True)
+    )
+    country_lazy = (
+        lf.group_by("country")
         .agg(pl.col("revenue").sum().alias("total_revenue"))
         .sort("total_revenue", descending=True)
     )
 
-
-def revenue_per_country(
-    df: pl.DataFrame,
-    start: str | date | datetime = DEFAULT_START,
-    end: str | date | datetime = DEFAULT_END,
-) -> pl.DataFrame:
-    return (
-        _filter_by_date_range(df, start, end)
-        .group_by("country")
-        .agg(pl.col("revenue").sum().alias("total_revenue"))
-        .sort("total_revenue", descending=True)
+    total_df, route_df, city_df, trend_df, class_df, country_df = pl.collect_all(
+        [total_lazy, route_lazy, city_lazy, trend_lazy, class_lazy, country_lazy]
     )
+
+    return {
+        "total_revenue": total_df.item(),
+        "top_route": route_df.row(0, named=True) if route_df.height else {},
+        "top_city": city_df.row(0, named=True) if city_df.height else {},
+        "trend_df": trend_df,
+        "class_df": class_df,
+        "country_df": country_df,
+    }
 
 
 

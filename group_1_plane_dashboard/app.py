@@ -8,7 +8,8 @@ from pathlib import Path
 from analysis.ticket_revenue import load_data, filter_data
 from analysis.staff import (
     load_staff_counts,
-    load_staff_assignments,
+    load_staff_employee_dim,
+    load_staff_monthly_agg,
     load_staff_usage,
     staff_global_kpis,
     aircraft_staff_requirements,
@@ -19,13 +20,9 @@ from analysis.staff import (
 )
 
 from analysis.revenue_analysis import (
+    compute_revenue_dashboard_metrics,
+    filter_by_date_range,
     load_revenue_data,
-    most_profitable_outgoing_route,
-    most_revenue_perceived,
-    revenue_class_analysis,
-    revenue_per_country,
-    revenue_trend_analysis,
-    total_revenue_per_range,
 )
 
 import db.tickets as db_tickets
@@ -72,7 +69,7 @@ def _fetch_tickets_from_db() -> None:
     pl.from_pandas(ap).write_parquet(DATA_DIR / "airports.parquet")
 
 
-@st.cache_data
+@st.cache_resource
 def get_ticket_data() -> pl.DataFrame:
     needed = [DATA_DIR / "tickets_agg.parquet", DATA_DIR / "airports.parquet"]
     if not all(p.exists() for p in needed):
@@ -81,25 +78,26 @@ def get_ticket_data() -> pl.DataFrame:
     return load_data()
 
 
-@st.cache_data
-def get_staff_data() -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame]:
+@st.cache_resource
+def get_staff_data() -> tuple[pl.DataFrame, pl.DataFrame, pl.DataFrame, pl.DataFrame]:
     needed = [
-        DATA_DIR / "q1_staff_counts.parquet", 
-        DATA_DIR / "q2_staff_assignments.parquet", 
+        DATA_DIR / "q1_staff_counts.parquet",
+        DATA_DIR / "staff_employee_dim.parquet",
+        DATA_DIR / "staff_monthly_agg.parquet",
         DATA_DIR / "q3_staff_usage.parquet"
     ]
     if not all(p.exists() for p in needed):
         st.error("Missing staff data Parquet files. Please run the extraction script manually (e.g. `python -m db.staff`) before using the dashboard.")
         st.stop()
-    return load_staff_counts(), load_staff_assignments(), load_staff_usage()
+    return load_staff_counts(), load_staff_employee_dim(), load_staff_monthly_agg(), load_staff_usage()
 
 
-@st.cache_data
+@st.cache_resource
 def get_revenue_data() -> pl.DataFrame:
     return load_revenue_data()
 
 
-@st.cache_data(show_spinner="Loading capacity data...", ttl=3600)
+@st.cache_resource(show_spinner="Loading capacity data...", ttl=3600)
 def get_capacity_data() -> pl.DataFrame:
     try:
         capacity_file = DATA_DIR / "capacity.parquet"
@@ -316,8 +314,8 @@ with tab1:
 # ══════════════════════════════════════════════════════════════════════════════
 
 with tab2:
-    counts_raw, assign_raw, usage_raw = get_staff_data()
-    if counts_raw.is_empty() or assign_raw.is_empty():
+    counts_raw, employee_dim, monthly_agg, usage_raw = get_staff_data()
+    if counts_raw.is_empty() or monthly_agg.is_empty():
         st.warning("Missing staff data Parquet files. Please run the extraction script manually (e.g. `python -m group_1_plane_dashboard.db.staff`) before using the dashboard.")
     else:
 
@@ -331,13 +329,13 @@ with tab2:
         with st.container():
             st.subheader("Staff filters")
 
-            all_years = sorted(assign_raw["year"].drop_nulls().unique().to_list())
+            all_years = sorted(monthly_agg["year"].drop_nulls().unique().to_list())
             year_range = st.select_slider(
                 "Year range", options=all_years, value=(all_years[0], all_years[-1])
             )
 
         # Apply filters
-        filtered_assign = assign_raw.filter(
+        filtered_assign = monthly_agg.filter(
             pl.col("year").is_between(year_range[0], year_range[1])
         )
 
@@ -349,9 +347,9 @@ with tab2:
         kpis = staff_global_kpis(counts_raw, filtered_assign)
         aircraft_reqs = aircraft_staff_requirements(filtered_usage)
         route_needs = route_staff_needs(filtered_usage)
-        dept_stats = department_stats(counts_raw, filtered_assign)
+        dept_stats = department_stats(counts_raw, employee_dim, filtered_assign)
         temporal_hours = flying_hours_over_time(filtered_assign)
-        util_df = staff_utilisation(filtered_assign)
+        util_df = staff_utilisation(filtered_assign, employee_dim)
 
         # ── KPIs ─────────────────────────────────────────────────────────
         k1, k2, k3 = st.columns(3)
@@ -583,11 +581,14 @@ with tab3:
         start = start_date.isoformat()
         end = end_date.isoformat()
 
-        total_revenue = total_revenue_per_range(location_filtered, start, end)
-        top_route = first_row(
-                most_profitable_outgoing_route(location_filtered, start, end)
-            )
-        top_city = first_row(most_revenue_perceived(location_filtered, start, end))
+        date_filtered = filter_by_date_range(location_filtered, start, end)
+        metrics = compute_revenue_dashboard_metrics(date_filtered)
+        total_revenue = metrics["total_revenue"]
+        top_route = metrics["top_route"]
+        top_city = metrics["top_city"]
+        trend_df = metrics["trend_df"]
+        class_df = metrics["class_df"]
+        country_df = metrics["country_df"]
 
         metric_cols = st.columns(3)
         metric_cols[0].metric( f"Total revenue", format_revenue(total_revenue))
@@ -608,7 +609,6 @@ with tab3:
                 format_revenue(top_city.get("total_revenue")),
             )
         st.caption(f"From {start} and {end}")
-        trend_df = revenue_trend_analysis(location_filtered, start, end)
         if trend_df.is_empty():
             st.info("No revenue trend data is available for this selection.")
         else:
@@ -632,7 +632,6 @@ with tab3:
 
         chart_cols = st.columns([1, 1.4])
 
-        class_df = revenue_class_analysis(location_filtered, start, end)
         with chart_cols[0]:
             if class_df.is_empty():
                     st.info("No class revenue data is available for this selection.")
@@ -662,7 +661,6 @@ with tab3:
                 classes_dict = {"E": "Economy","B": "Business", "P": "Premium"}
                 st.caption(f"Class attracting the highest revenue: {classes_dict[class_max]}")
 
-        country_df = revenue_per_country(location_filtered, start, end)
         with chart_cols[1]:
                 if country_df.is_empty():
                     st.info("No country revenue data is available for this selection.")
@@ -710,7 +708,7 @@ with tab3:
 
 with tab4:
     df_capacity = get_capacity_data()
-    
+
     if df_capacity.is_empty():
         st.warning("No capacity data available. Please ensure capacity.parquet is in the data directory.")
     else:
@@ -845,9 +843,9 @@ with tab4:
             dow_fig.update_yaxes(tickformat=".0%")
             dow_fig.update_layout(margin=dict(l=0, r=0, t=50, b=0))
             st.plotly_chart(dow_fig, use_container_width=True)
-        
+
         st.divider()
-        
+
         # ─────────────────────────────────────────────────────────────
         # VISUALIZATION 2: Capacity by Flight ID
         # ─────────────────────────────────────────────────────────────
@@ -890,9 +888,9 @@ with tab4:
             top_flights = flight_data.nlargest(10, "avg_capacity")[["flight_id", "avg_capacity", "route_id"]]
             top_flights["avg_capacity"] = top_flights["avg_capacity"].apply(lambda x: f"{x:.1%}")
             st.dataframe(top_flights, use_container_width=True, hide_index=True)
-        
+
         st.divider()
-        
+
         # ─────────────────────────────────────────────────────────────
         # VISUALIZATION 3: Capacity by Route ID
         # ─────────────────────────────────────────────────────────────
